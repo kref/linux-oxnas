@@ -4,7 +4,6 @@
 #include <linux/of_platform.h>
 #include <linux/clocksource.h>
 #include <linux/clk-provider.h>
-#include <linux/clk/oxnas.h>
 #include <asm/mach-types.h>
 #include <asm/mach/map.h>
 #include <asm/mach/arch.h>
@@ -38,8 +37,6 @@ void __init ox820_map_common_io(void)
 static void __init ox820_dt_init(void)
 {
         int ret;
-
-        oxnas_init_clocks();
 
         ret = of_platform_populate(NULL, of_default_bus_match_table, NULL,
                                    NULL);

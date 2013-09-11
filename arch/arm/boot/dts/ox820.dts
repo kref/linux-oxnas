@@ -107,7 +107,7 @@
 		compatible = "mpcore_wdt";
 		reg = <0x47000620 0x20>;
 		interrupts = <1 14 0x304>;	/* percpu, irq 30, cpu mask 3, level high */
-		clocks = <&twdrefclk>;
+		clocks = <&twdclk>;
 	};
 
 	timer@44400200 {
