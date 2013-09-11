@@ -352,6 +352,14 @@ config ARCH_VERSATILE
 	help
 	  This enables support for ARM Ltd Versatile board.
 
+config ARCH_OXNAS
+	bool "Oxford Semiconductor 815/820/825 NAS SoC"
+	select CLKDEV_LOOKUP
+	select GENERIC_CLOCKEVENTS
+	select COMMON_CLK
+	help
+		This enables support for Oxsemi 815/820/825 NAS SoC
+
 config ARCH_AT91
 	bool "Atmel AT91"
 	select ARCH_REQUIRE_GPIOLIB
@@ -983,6 +991,8 @@ source "arch/arm/mach-omap1/Kconfig"
 source "arch/arm/mach-omap2/Kconfig"
 
 source "arch/arm/mach-orion5x/Kconfig"
+
+source "arch/arm/mach-oxnas/Kconfig"
 
 source "arch/arm/mach-picoxcell/Kconfig"
 

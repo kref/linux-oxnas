@@ -1,0 +1,27 @@
+choice
+	prompt "Oxnas platform type"
+	default MACH_OXNAS
+	depends on ARCH_OXNAS
+
+config MACH_OX820
+	bool "Generic NAS7820 Support"
+	select ARM_GIC
+	select GENERIC_CLOCKEVENTS
+	select CPU_V6K
+	select HAVE_ARM_SCU if SMP
+	select HAVE_ARM_TWD if LOCAL_TIMERS
+	select HAVE_SMP
+	select PLXTECH_RPS
+	select CLKSRC_OF
+	select CLKSRC_RPS_TIMER
+	select USB_ARCH_HAS_EHCI
+	help
+	  Include support for the ox820 platform.
+
+endchoice
+
+config TESTING_POGO
+	bool "Support Pogoplug v3"
+	depends on MACH_OX820
+	help
+	  Enable support for pogoplug v3
