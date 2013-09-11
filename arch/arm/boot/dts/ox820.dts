@@ -1,0 +1,149 @@
+/*
+ * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
+
+/dts-v1/;
+
+/include/ "skeleton.dtsi"
+
+/ {
+	compatible = "plxtech,nas7820", "plxtech,nas782x";
+	interrupt-parent = <&gic>;
+
+	chosen {
+		bootargs = "console=ttyS0,115200n8 earlyprintk loglevel=15";
+	};
+
+	aliases {
+		 serial0 = &uart1;
+	};
+	
+	cpus {
+		cpu@0 {
+			compatible = "arm,arm11mpcore";
+		};
+		cpu@1 {
+			compatible = "arm,arm11mpcore";
+		};
+	};
+
+	gic: gic@47001000 {
+		compatible = "arm,arm11mp-gic";
+		interrupt-controller;
+		#interrupt-cells = <3>;
+		reg = <0x47001000 0x1000>,
+		      <0x47000100 0x0100>;
+	};
+
+	rps: rps@44400000 {
+		compatible = "plxtech,nas782x-rps";
+		interrupt-controller;
+		#interrupt-cells = <1>;
+		reg = <0x44400000 0x14>;
+		interrupts = <0 5 0x304>;
+	};
+
+	/* external oscillator */
+	osc: oscillator {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency  = <25000000>;
+		clock-output-names = "osc";
+	};
+
+	sysclk: sysclk {
+		compatible = "fixed-factor-clock";
+		#clock-cells = <0>;
+		clock-div = <4>;
+		clock-mult = <1>;
+		clocks = <&osc>;
+		clock-output-names = "sysclk";
+	};
+
+	plla: pll@44e001f0 {
+		compatible = "plxtech,nas782x-plla";
+		#clock-cells = <1>;
+		clocks = <&osc 0>;
+		clock-names = "osc";
+		reg = <0x44e001f0 0x10>;
+		clock-output-names = "pll", "pll-switched";
+	};
+
+	fackpll: fackpll {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency  = <750000000>;
+		clock-output-names = "fackpll";
+	};
+
+	twdclk: twdclk {
+		compatible = "fixed-factor-clock";
+		#clock-cells = <0>;
+		clock-div = <2>;
+		clock-mult = <1>;
+		clocks = <&fackpll>;
+		clock-output-names = "twdclk";
+	};
+
+	gmacclk: gmacclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency  = <125000000>;
+		clock-output-names = "gmacclk";
+	};
+	
+	local-timer@47000600 {
+		compatible = "arm,arm11mp-twd-timer";
+		reg = <0x47000600 0x20>;
+		interrupts = <1 13 0x304>;	/* percpu, irq 29, cpu mask 3, level high */
+		clocks = <&twdclk>;
+	};
+
+	watchdog@47000620 {
+		compatible = "mpcore_wdt";
+		reg = <0x47000620 0x20>;
+		interrupts = <1 14 0x304>;	/* percpu, irq 30, cpu mask 3, level high */
+		clocks = <&twdrefclk>;
+	};
+
+	timer@44400200 {
+		compatible = "plxtech,nas782x-rps-timer";
+		reg = <0x44400200 0x40>;
+		clocks = <&sysclk>;
+		interrupts = <4>;
+		interrupt-parent = <&rps>;
+	};
+
+	uart1: uart1@44200000 {
+		compatible = "ns16550a";
+		reg = <0x44200000 0x100>;
+		clock-frequency = <6250000>;
+		interrupts = <0 23 0x304>;
+		reg-shift = <0>;
+		fifo-size = <16>;
+		reg-io-width = <1>;
+		current-speed = <115200>;
+		no-loopback-test;
+	};
+
+	gmac: ethernet@40400000 {
+		compatible = "snps,dwmac";
+		reg = <0x40400000 0x2000>;
+		interrupts = <0 8 0x304>, <0 17 0x304>;
+		interrupt-names = "macirq", "eth_wake_irq";
+		mac-address = [000000000000]; /* Filled in by U-Boot */
+		phy-mode = "rgmii";
+		clocks = <&gmacclk>;
+		clock-names = "stmmaceth";
+	};
+
+	ehci@40200100 {
+		compatible = "plxtch,nas782x-ehci";
+		reg = <0x40200100 0xf00>;
+		interrupts = <0 7 0x304>;
+	};
+};
