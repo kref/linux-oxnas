@@ -329,6 +329,13 @@ config SATA_VITESSE
 
 	  If unsure, say N.
 
+config SATA_OXNAS
+	tristate "PLXTECH NAS782X SATA support"
+	help
+	  This option enables support for Nas782x Serial ATA controller.
+
+	  If unsure, say N.
+
 comment "PATA SFF controllers with BMDMA"
 
 config PATA_ALI
