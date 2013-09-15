@@ -21,7 +21,7 @@
 	aliases {
 		 serial0 = &uart1;
 	};
-	
+
 	cpus {
 		cpu@0 {
 			compatible = "arm,arm11mpcore";
@@ -128,6 +128,15 @@
 		reg-io-width = <1>;
 		current-speed = <115200>;
 		no-loopback-test;
+	};
+
+	sata@45900000 {
+		compatible = "plxtech,nas782x-sata";
+			/*	port		sgdma		core	*/
+		reg = <0x45900000 0x100>, <0x459B0000 0x10>, <0x459E0000 0x2000>,
+			/*	phy		descriptors (optional)	*/
+			<0x44900000 0x0C>, <0x50000000 0x1000>;
+		interrupts = <0 18 0x304>;
 	};
 
 	gmac: ethernet@40400000 {
