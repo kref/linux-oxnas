@@ -76,7 +76,7 @@
 	fackpll: fackpll {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
-		clock-frequency  = <750000000>;
+		clock-frequency  = <800000000>;
 		clock-output-names = "fackpll";
 	};
 
