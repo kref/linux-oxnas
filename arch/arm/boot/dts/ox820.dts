@@ -145,5 +145,6 @@
 		compatible = "plxtch,nas782x-ehci";
 		reg = <0x40200100 0xf00>;
 		interrupts = <0 7 0x304>;
+		use_pllb_clk;
 	};
 };

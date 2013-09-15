@@ -33,6 +33,8 @@ static int start_oxnas_usb_ehci(struct platform_device *dev)
 	u32 power_polarity_default = readl(SYS_CTRL_USBHSMPH_CTRL);
 	u32 usb_hs_ifg;
 	u32 reg;
+	int use_pllb_clk = of_property_read_bool(dev->dev.of_node, "use_pllb_clk");
+	int phya_is_host = of_property_read_bool(dev->dev.of_node, "phya_is_host");
 
 	power_polarity_default = readl(SYS_CTRL_USBHSMPH_CTRL);
 
@@ -46,34 +48,37 @@ static int start_oxnas_usb_ehci(struct platform_device *dev)
 
 	writel(power_polarity_default, SYS_CTRL_USBHSMPH_CTRL);
 
-	// turn on internal 12MHz clock for OX820 architecture USB
-	enable_clock(SYS_CTRL_CLK_REF600);
-	block_reset(SYS_CTRL_RST_PLLB, 0);
 
-#ifdef CONFIG_USB_OX820_FROM_PLLB
-	writel((readl(SYS_CTRL_SECONDARY_SEL) | (1UL<<9)), SYS_CTRL_SECONDARY_SEL); /* enable monitor output  mf_a9 */
-	writel( (1 << PLLB_ENSAT) | (1 << PLLB_OUTDIV) | (2<<PLLB_REFDIV), SEC_CTRL_PLLB_CTRL0); /*  */
-	writel( (50 << USB_REF_600_DIVIDER), SEC_CTRL_PLLB_DIV_CTRL);  // 600MHz pllb divider for 12MHz
-#endif
-	writel(25 << USB_REF_300_DIVIDER, SYS_CTRL_REF300_DIV); // ref 300 divider for 12MHz
+	if (use_pllb_clk) {
 
-	//block_reset(SYS_CTRL_RST_USBDEV, 1);
+		dev_info(&dev->dev, "use PLLB as usb clock source\n");
 
-	// Ensure the USB block is properly reset
+		block_reset(SYS_CTRL_RST_PLLB, 0);
+		enable_clock(SYS_CTRL_CLK_REF600);
+
+		writel((1 << PLLB_ENSAT) | (1 << PLLB_OUTDIV) | (2 << PLLB_REFDIV),
+				SEC_CTRL_PLLB_CTRL0);
+		/* 600MHz pllb divider for 12MHz */
+		writel(PLLB_DIV_INT(50) | PLLB_DIV_FRAC(0), SEC_CTRL_PLLB_DIV_CTRL);
+
+	} else {
+		/* according to hrm, ref300 is from sata phy, seems that IS the problem */
+		/* ref 300 divider for 12MHz */
+		writel(REF300_DIV_INT(25) | REF300_DIV_FRAC(0), SYS_CTRL_REF300_DIV);
+	}
+
+	/* Ensure the USB block is properly reset */
 	block_reset(SYS_CTRL_RST_USBHS, 1);
-	wmb();
 	block_reset(SYS_CTRL_RST_USBHS, 0);
 
 	block_reset(SYS_CTRL_RST_USBHSPHYA, 1);
-	wmb();
 	block_reset(SYS_CTRL_RST_USBHSPHYA, 0);
 
 	block_reset(SYS_CTRL_RST_USBHSPHYB, 1);
-	wmb();
 	block_reset(SYS_CTRL_RST_USBHSPHYB, 0);
 
-	// Force the high speed clock to be generated all the time, via serial
-	// programming of the USB HS PHY
+	/* Force the high speed clock to be generated all the time, via serial
+	 programming of the USB HS PHY */
 	writel((2UL << USBHSPHY_TEST_ADD) |
 		   (0xe0UL << USBHSPHY_TEST_DIN), SYS_CTRL_USBHSPHY_CTRL);
 
@@ -88,22 +93,21 @@ static int start_oxnas_usb_ehci(struct platform_device *dev)
 		   (0xfUL << USBHSPHY_TEST_ADD) |
 		   (0xaaUL << USBHSPHY_TEST_DIN), SYS_CTRL_USBHSPHY_CTRL);
 
-	/* select the correct clock now out of reset */
-#ifdef CONFIG_USB_OX820_FROM_PLLB
-	writel(USB_CLK_INTERNAL | USB_INT_CLK_PLLB, SYS_CTRL_USB_CTRL); // use pllb clock
-#else
-	writel(USB_CLK_INTERNAL | USB_INT_CLK_REF300, SYS_CTRL_USB_CTRL); // use ref300 derived clock
-#endif
-/*
-	// Configure USB PHYA as a host
-	reg = readl(SYS_CTRL_USB_CTRL);
-	reg &= ~USBAMUX_DEVICE;
-	writel(reg, SYS_CTRL_USB_CTRL);
-*/
-	// Enable the clock to the USB block
+	if (use_pllb_clk) /* use pllb clock */
+		writel(USB_CLK_INTERNAL | USB_INT_CLK_PLLB, SYS_CTRL_USB_CTRL);
+	else /* use ref300 derived clock */
+		writel(USB_CLK_INTERNAL | USB_INT_CLK_REF300, SYS_CTRL_USB_CTRL);
+
+	if (phya_is_host) {
+		/* Configure USB PHYA as a host */
+		dev_info(&dev->dev, "setting PHYA to host mode\n");
+		reg = readl(SYS_CTRL_USB_CTRL);
+		reg &= ~USBAMUX_DEVICE;
+		writel(reg, SYS_CTRL_USB_CTRL);
+	}
+
+	/* Enable the clock to the USB block */
 	enable_clock(SYS_CTRL_CLK_USBHS);
-	// Ensure reset and clock operations are complete
-	wmb();
 
 	return 0;
 }
