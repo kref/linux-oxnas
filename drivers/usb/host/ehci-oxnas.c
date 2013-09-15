@@ -16,6 +16,7 @@
 #include <linux/of_irq.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
+#include <linux/dma-mapping.h>
 #include <mach/hardware.h>
 #include <mach/clock.h>
 
@@ -147,6 +148,11 @@ static int ehci_oxnas_drv_probe(struct platform_device *ofdev)
 
 	if (usb_disabled())
 		return -ENODEV;
+
+	if (!ofdev->dev.dma_mask)
+		ofdev->dev.dma_mask = &ofdev->dev.coherent_dma_mask;
+	if (!ofdev->dev.coherent_dma_mask)
+		ofdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 
 	err = of_address_to_resource(np, 0, &res);
 	if (err)
