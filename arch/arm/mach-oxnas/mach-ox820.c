@@ -65,7 +65,7 @@ void ox820_init_early(void)
 
 }
 
-void ox820_assert_system_reset(char mode, const char *cmd)
+void ox820_assert_system_reset(enum reboot_mode mode, const char * cmd)
 {
 	u32 value;
 
