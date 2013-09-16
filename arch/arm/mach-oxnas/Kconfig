@@ -15,6 +15,8 @@ config MACH_OX820
 	select CLKSRC_OF
 	select CLKSRC_RPS_TIMER
 	select USB_ARCH_HAS_EHCI
+	select PINCTRL_OXNAS
+	select PINCTRL
 	help
 	  Include support for the ox820 platform.
 
