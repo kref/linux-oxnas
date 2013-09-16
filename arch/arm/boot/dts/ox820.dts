@@ -19,7 +19,10 @@
 	};
 
 	aliases {
-		 serial0 = &uart1;
+		serial0 = &uart0;
+		/* alias to determine bank index */
+		gpio0 = &GPIOA;
+		gpio1 = &GPIOB;
 	};
 
 	cpus {
@@ -95,6 +98,78 @@
 		clock-frequency  = <125000000>;
 		clock-output-names = "gmacclk";
 	};
+
+
+	pinctrl@0 {
+		/* act as a simple bus, so children will be probed automatically */
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "plxtech,nas782x-pinctrl", "simple-bus";
+		ranges;
+
+		plxtech,mux-mask = <
+			 0xFFFFFFFF 0xCC0FFDF9 0xFC000E60 0x0F03F7E0 0xF00C0FE0
+			 0x0003FFFF 0x00037FFF 0x0003FFF8 0x00000F00 0x0003F7F3
+			>;
+
+		GPIOA: gpio@44000000 {
+			compatible = "plxtech,nas782x-gpio";
+			reg = <0x44000000 0x100>, <0x44E00000 0x200>;
+			interrupts = <0 21 0x304>;
+			#gpio-cells = <2>;
+			gpio-controller;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			#gpio-lines = <32>; /* real gpio pin count */
+		};
+
+		GPIOB: gpio@44100000 {
+			compatible = "plxtech,nas782x-gpio";
+			reg = <0x44100000 0x100>, <0x44F00000 0x200>;
+			interrupts = <0 22 0x304>;
+			#gpio-cells = <2>;
+			gpio-controller;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			#gpio-lines = <18>; /* real gpio pin count */
+		};
+
+		uart0 {
+			pinctrl_uart0: uart0-0 {
+				plxtech,pins =
+					<0 30 5 0	/* MF_A30 PINMUX_ALT PINMUX_UARTA_SIN */
+					 0 31 5 0>;	/* MF_A31 PINMUX_ALT PINMUX_UARTA_SOUT */
+			};
+		};
+
+		gmac0 {
+			pinctrl_gmac0: gmac0-0 {
+				plxtech,pins =
+					<0 3 1 0	/* MF_A3 PINMUX_2 PINMUX_MACA_MDC */
+					 0 4 1 0>;	/* MF_A4 PINMUX_2 PINMUX_MACA_MDIO */
+			};
+		};
+
+		nand0 {
+			pinctrl_nand0: nand0-0 {
+				plxtech,pins =
+					<0 12 1 0	/* MF_A12 PINMUX_2 PINMUX_STATIC_DATA0 */
+					 0 13 1 0	/* MF_A13 PINMUX_2 PINMUX_STATIC_DATA1 */
+					 0 14 1 0	/* MF_A14 PINMUX_2 PINMUX_STATIC_DATA2 */
+					 0 15 1 0	/* MF_A15 PINMUX_2 PINMUX_STATIC_DATA3 */
+					 0 16 1 0	/* MF_A16 PINMUX_2 PINMUX_STATIC_DATA4 */
+					 0 17 1 0	/* MF_A17 PINMUX_2 PINMUX_STATIC_DATA5 */
+					 0 18 1 0	/* MF_A18 PINMUX_2 PINMUX_STATIC_DATA6 */
+					 0 19 1 0	/* MF_A19 PINMUX_2 PINMUX_STATIC_DATA7 */
+
+					 0 20 1 0	/* MF_A20 PINMUX_2 PINMUX_STATIC_NWE */
+					 0 21 1 0	/* MF_A21 PINMUX_2 PINMUX_STATIC_NOE */
+					 0 22 1 0	/* MF_A22 PINMUX_2 PINMUX_STATIC_NCS */
+					 0 23 1 0	/* MF_A23 PINMUX_2 PINMUX_STATIC_ADDR18 */
+					 0 24 1 0>;	/* MF_A24 PINMUX_2 PINMUX_STATIC_ADDR19 */
+			};
+		};
+	};
 	
 	local-timer@47000600 {
 		compatible = "arm,arm11mp-twd-timer";
@@ -118,7 +193,7 @@
 		interrupt-parent = <&rps>;
 	};
 
-	uart1: uart1@44200000 {
+	uart0: uart@44200000 {
 		compatible = "ns16550a";
 		reg = <0x44200000 0x100>;
 		clock-frequency = <6250000>;
@@ -128,6 +203,8 @@
 		reg-io-width = <1>;
 		current-speed = <115200>;
 		no-loopback-test;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_uart0>;
 	};
 
 	sata@45900000 {
@@ -148,6 +225,8 @@
 		phy-mode = "rgmii";
 		clocks = <&gmacclk>;
 		clock-names = "stmmaceth";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_gmac0>;
 	};
 
 	ehci@40200100 {
