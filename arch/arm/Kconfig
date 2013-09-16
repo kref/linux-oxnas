@@ -354,6 +354,7 @@ config ARCH_VERSATILE
 
 config ARCH_OXNAS
 	bool "Oxford Semiconductor 815/820/825 NAS SoC"
+	select ARCH_REQUIRE_GPIOLIB
 	select CLKDEV_LOOKUP
 	select GENERIC_CLOCKEVENTS
 	select COMMON_CLK

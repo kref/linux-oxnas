@@ -58,6 +58,15 @@ config PINCTRL_AT91
 	help
 	  Say Y here to enable the at91 pinctrl driver
 
+config PINCTRL_OXNAS
+	bool "OXNAS pinctrl driver"
+	depends on OF
+	depends on ARCH_OXNAS
+	select PINMUX
+	select PINCONF
+	help
+	  Say Y here to enable the oxnas pinctrl driver
+
 config PINCTRL_BAYTRAIL
 	bool "Intel Baytrail GPIO pin control"
 	depends on GPIOLIB && ACPI && X86
