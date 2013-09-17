@@ -19,4 +19,9 @@ config PCI_TEGRA
 	bool "NVIDIA Tegra PCIe controller"
 	depends on ARCH_TEGRA
 
+config PCI_OXNAS
+	bool "PLX Oxnas PCIe controller"
+	depends on ARCH_OXNAS
+	select PCIEPORTBUS
+
 endmenu
