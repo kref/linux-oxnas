@@ -76,7 +76,10 @@ enum {
 	OUTPUT_ENABLE = 4,
 	IRQ_PENDING = 0xC,
 	OUTPUT_VALUE = 0x10,
-
+	OUTPUT_SET = 0x14,
+	OUTPUT_CLEAR = 0x18,
+	OUTPUT_EN_SET = 0x1C,
+	OUTPUT_EN_CLEAR = 0x20,
 	DEBOUNCE_ENABLE = 0x24,
 	RE_IRQ_ENABLE = 0x28, /* rising edge */
 	FE_IRQ_ENABLE = 0x2C, /* falling edge */
@@ -502,9 +505,9 @@ static void oxnas_mux_gpio_enable(void __iomem *cio, void __iomem *pio, unsigned
 {
 	oxnas_mux_set_gpio(cio, mask);
 	if (input)
-		oxnas_register_clear_mask(pio + OUTPUT_ENABLE, mask);
+		writel_relaxed(mask, pio + OUTPUT_EN_CLEAR);
 	else
-		oxnas_register_set_mask(pio + OUTPUT_ENABLE, mask);
+		writel_relaxed(mask, pio + OUTPUT_EN_SET);
 }
 
 static void oxnas_mux_gpio_disable(void __iomem *cio, void __iomem *pio, unsigned mask)
@@ -1051,8 +1054,7 @@ static int oxnas_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
 	struct oxnas_gpio_chip *oxnas_gpio = to_oxnas_gpio_chip(chip);
 	void __iomem *pio = oxnas_gpio->regbase;
 
-	oxnas_register_clear_mask(pio + OUTPUT_ENABLE, BIT(offset));
-
+	writel_relaxed(BIT(offset), pio + OUTPUT_EN_CLEAR);
 	return 0;
 }
 
@@ -1073,7 +1075,11 @@ static void oxnas_gpio_set(struct gpio_chip *chip, unsigned offset,
 	struct oxnas_gpio_chip *oxnas_gpio = to_oxnas_gpio_chip(chip);
 	void __iomem *pio = oxnas_gpio->regbase;
 
-	oxnas_register_value_mask(pio + OUTPUT_VALUE, BIT(offset), val << offset);
+	if (val)
+		writel_relaxed(BIT(offset), pio + OUTPUT_SET);
+	else
+		writel_relaxed(BIT(offset), pio + OUTPUT_CLEAR);
+
 }
 
 static int oxnas_gpio_direction_output(struct gpio_chip *chip, unsigned offset,
@@ -1082,8 +1088,12 @@ static int oxnas_gpio_direction_output(struct gpio_chip *chip, unsigned offset,
 	struct oxnas_gpio_chip *oxnas_gpio = to_oxnas_gpio_chip(chip);
 	void __iomem *pio = oxnas_gpio->regbase;
 
-	oxnas_register_value_mask(pio + OUTPUT_VALUE, BIT(offset), val << offset);
-	oxnas_register_set_mask(pio + OUTPUT_ENABLE, BIT(offset));
+	if (val)
+		writel_relaxed(BIT(offset), pio + OUTPUT_SET);
+	else
+		writel_relaxed(BIT(offset), pio + OUTPUT_CLEAR);
+
+	writel_relaxed(BIT(offset), pio + OUTPUT_EN_SET);
 
 	return 0;
 }
