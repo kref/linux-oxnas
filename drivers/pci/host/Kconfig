@@ -33,4 +33,9 @@ config PCI_RCAR_GEN2
 	  There are 3 internal PCI controllers available with a single
 	  built-in EHCI/OHCI host controller present on each one.
 
+config PCI_OXNAS
+	bool "PLX Oxnas PCIe controller"
+	depends on ARCH_OXNAS
+	select PCIEPORTBUS
+
 endmenu

@@ -162,7 +162,6 @@ DT_MACHINE_START(OX820_DT, "PLXTECH NAS782X SoC (Flattened Device Tree)")
 	.map_io		= ox820_map_common_io,
 	.smp		= smp_ops(ox820_smp_ops),
 	.init_early	= ox820_init_early,
-	//.init_irq	= ox820_dt_init_irq,
 	.init_time	= ox820_timer_init,
 	.init_machine	= ox820_dt_init,
 	.restart	= ox820_assert_system_reset,
