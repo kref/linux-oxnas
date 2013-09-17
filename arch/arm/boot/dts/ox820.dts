@@ -100,7 +100,7 @@
 	};
 
 
-	pinctrl@0 {
+	pinctrl {
 		/* act as a simple bus, so children will be probed automatically */
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -169,6 +169,76 @@
 					 0 24 1 0>;	/* MF_A24 PINMUX_2 PINMUX_STATIC_ADDR19 */
 			};
 		};
+	};
+
+	pcie-controller@47C00000 {
+		compatible = "plxtech,nas782x-pcie";
+		device_type = "pci";
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		/*		flag & space	bus address	host address	size */
+		ranges = <	0x82000000	0 0x48000000	0x48000000	0 0x2000000
+				0xC2000000	0 0x4A000000	0x4A000000	0 0x1E00000
+				0x81000000	0 0x4BE00000	0x4BE00000	0 0x0100000
+				0x80000000	0 0x4BF00000	0x4BF00000	0 0x0100000>;
+
+		bus-range = <0x00 0xff>;
+
+		/*	cfg			inbound translator	phy*/
+		reg =	<0x47C00000 0x1000>,	<0x47D00000 0x100>,	 <0x44A00000 0x10>;
+
+		#interrupt-cells = <1>;
+		/* wild card mask, match all bus address & interrupt specifier */
+		/* format: bus address mask, interrupt specifier mask */
+		/* each bit 1 means need match, 0 means ignored when match */
+		interrupt-map-mask = <0 0 0 0>;
+		/* format: a list of: bus address, interrupt specifier, 
+		 * parent interrupt controller & specifier */
+		interrupt-map = <0 0 0 0 &gic 19>;
+
+		gpios = <&GPIOB 12 0>;
+		//clocks = <&xxxx 5>;
+
+		plxtech,pcie-hcsl-bit = <2>;
+		plxtech,pcie-reset-bit = <7>;
+		plxtech,pcie-ctrl-offset = <0x120>;
+		plxtech,pcie-outbound-offset = <0x138>;
+	};
+
+	pcie-controller@47E00000 {
+		compatible = "plxtech,nas782x-pcie";
+		device_type = "pci";
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		/*		flag & space	bus address	host address	size */
+		ranges = <	0x82000000	0 0x4C000000	0x4C000000	0 0x2000000
+				0xC2000000	0 0x4E000000	0x4E000000	0 0x1E00000
+				0x81000000	0 0x4FE00000	0x4FE00000	0 0x0100000
+				0x80000000	0 0x4FF00000	0x4FF00000	0 0x0100000>;
+
+		bus-range = <0x00 0xff>;
+
+		/*	cfg			inbound translator	phy*/
+		reg =	<0x47E00000 0x1000>,	<0x47F00000 0x100>,	<0x44A00000 0x10>;
+
+		#interrupt-cells = <1>;
+		/* wild card mask, match all bus address & interrupt specifier */
+		/* format: bus address mask, interrupt specifier mask */
+		/* each bit 1 means need match, 0 means ignored when match */
+		interrupt-map-mask = <0 0 0 0>;
+		/* format: a list of: bus address, interrupt specifier, 
+		 * parent interrupt controller & specifier */
+		interrupt-map = <0 0 0 0 &gic 20>;
+
+		/* gpios = <&GPIOB 12 0>; */
+		//clocks = <&xxxx 5>;
+
+		plxtech,pcie-hcsl-bit = <3>;
+		plxtech,pcie-reset-bit = <23>;
+		plxtech,pcie-ctrl-offset = <0x124>;
+		plxtech,pcie-outbound-offset = <0x174>;
 	};
 	
 	local-timer@47000600 {
