@@ -1376,7 +1376,7 @@ static int oxnas_gpio_probe(struct platform_device *pdev)
 	chip->base = alias_idx * MAX_NB_GPIO_PER_BANK;
 
 	if (!of_property_read_u32(np, "#gpio-lines", &ngpio)) {
-		if (ngpio >= MAX_NB_GPIO_PER_BANK)
+		if (ngpio > MAX_NB_GPIO_PER_BANK)
 			pr_err("oxnas_gpio.%d, gpio-nb >= %d failback to %d\n",
 			       alias_idx, MAX_NB_GPIO_PER_BANK, MAX_NB_GPIO_PER_BANK);
 		else
