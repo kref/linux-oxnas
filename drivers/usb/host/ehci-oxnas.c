@@ -17,16 +17,25 @@
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 #include <linux/dma-mapping.h>
+#include <linux/clk.h>
 #include <mach/hardware.h>
-#include <mach/clock.h>
+#include <mach/utils.h>
 
 #include "ehci.h"
+
+struct oxnas_hcd {
+	struct clk *clk;
+	struct clk *refsrc;
+	struct clk *phyref;
+	int use_pllb;
+	int use_phya;
+};
 
 #define DRIVER_DESC "Oxnas On-Chip EHCI Host Controller"
 
 static struct hc_driver __read_mostly oxnas_hc_driver;
 
-static int start_oxnas_usb_ehci(struct platform_device *dev)
+static void start_oxnas_usb_ehci(struct oxnas_hcd *oxnas)
 {
 	u32 input_polarity = 0;
 	u32 output_polarity = 0;
@@ -49,15 +58,11 @@ static int start_oxnas_usb_ehci(struct platform_device *dev)
 	writel(power_polarity_default, SYS_CTRL_USBHSMPH_CTRL);
 
 
-	if (use_pllb_clk) {
-
-		dev_info(&dev->dev, "use PLLB as usb clock source\n");
-
-		block_reset(SYS_CTRL_RST_PLLB, 0);
-		enable_clock(SYS_CTRL_CLK_REF600);
-
-		writel((1 << PLLB_ENSAT) | (1 << PLLB_OUTDIV) | (2 << PLLB_REFDIV),
-				SEC_CTRL_PLLB_CTRL0);
+	if (oxnas->use_pllb) {
+		/* enable pllb */
+		clk_prepare_enable(oxnas->refsrc);
+		/* enable ref600 */
+		clk_prepare_enable(oxnas->phyref);
 		/* 600MHz pllb divider for 12MHz */
 		writel(PLLB_DIV_INT(50) | PLLB_DIV_FRAC(0), SEC_CTRL_PLLB_DIV_CTRL);
 
@@ -93,29 +98,30 @@ static int start_oxnas_usb_ehci(struct platform_device *dev)
 		   (0xfUL << USBHSPHY_TEST_ADD) |
 		   (0xaaUL << USBHSPHY_TEST_DIN), SYS_CTRL_USBHSPHY_CTRL);
 
-	if (use_pllb_clk) /* use pllb clock */
+	if (oxnas->use_pllb) /* use pllb clock */
 		writel(USB_CLK_INTERNAL | USB_INT_CLK_PLLB, SYS_CTRL_USB_CTRL);
 	else /* use ref300 derived clock */
 		writel(USB_CLK_INTERNAL | USB_INT_CLK_REF300, SYS_CTRL_USB_CTRL);
 
-	if (phya_is_host) {
+	if (oxnas->use_phya) {
 		/* Configure USB PHYA as a host */
-		dev_info(&dev->dev, "setting PHYA to host mode\n");
 		reg = readl(SYS_CTRL_USB_CTRL);
 		reg &= ~USBAMUX_DEVICE;
 		writel(reg, SYS_CTRL_USB_CTRL);
 	}
 
 	/* Enable the clock to the USB block */
-	enable_clock(SYS_CTRL_CLK_USBHS);
-
-	return 0;
+	clk_prepare_enable(oxnas->clk);
 }
 
-static void stop_oxnas_usb_ehci(void)
+static void stop_oxnas_usb_ehci(struct oxnas_hcd *oxnas)
 {
 	block_reset(SYS_CTRL_RST_USBHS, 1);
-	disable_clock(SYS_CTRL_CLK_USBHS);
+	if (oxnas->use_pllb) {
+		clk_disable_unprepare(oxnas->phyref);
+		clk_disable_unprepare(oxnas->refsrc);
+	}
+	clk_disable_unprepare(oxnas->clk);
 }
 
 static int ehci_oxnas_reset(struct usb_hcd *hcd)
@@ -148,6 +154,7 @@ static int ehci_oxnas_drv_probe(struct platform_device *ofdev)
 	struct usb_hcd *hcd;
 	struct ehci_hcd *ehci;
 	struct resource res;
+	struct oxnas_hcd *oxnas;
 	int irq, err;
 
 	if (usb_disabled())
@@ -158,17 +165,52 @@ static int ehci_oxnas_drv_probe(struct platform_device *ofdev)
 	if (!ofdev->dev.coherent_dma_mask)
 		ofdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 
-	err = of_address_to_resource(np, 0, &res);
-	if (err)
-		return err;
-
 	hcd = usb_create_hcd(&oxnas_hc_driver,	&ofdev->dev,
 					dev_name(&ofdev->dev));
 	if (!hcd)
 		return -ENOMEM;
 
+	err = of_address_to_resource(np, 0, &res);
+	if (err)
+		goto err_res;
+
 	hcd->rsrc_start = res.start;
 	hcd->rsrc_len = resource_size(&res);
+
+	hcd->regs = devm_ioremap_resource(&ofdev->dev, &res);
+	if (IS_ERR(hcd->regs)) {
+		dev_err(&ofdev->dev, "devm_ioremap_resource failed\n");
+		err = PTR_ERR(hcd->regs);
+		goto err_ioremap;
+	}
+
+	oxnas = (struct oxnas_hcd *)hcd_to_ehci(hcd)->priv;
+
+	oxnas->use_pllb = of_property_read_bool(np, "plxtch,ehci_use_pllb");
+	oxnas->use_phya = of_property_read_bool(np, "plxtch,ehci_use_phya");
+
+	oxnas->clk = of_clk_get_by_name(np, "usb");
+	if (IS_ERR(oxnas->clk)) {
+		err = PTR_ERR(oxnas->clk);
+		goto err_clk;
+	}
+
+	if (oxnas->use_pllb) {
+		oxnas->refsrc = of_clk_get_by_name(np, "refsrc");
+		if (IS_ERR(oxnas->refsrc)) {
+			err = PTR_ERR(oxnas->refsrc);
+			goto err_refsrc;
+		}
+		oxnas->phyref = of_clk_get_by_name(np, "phyref");
+		if (IS_ERR(oxnas->refsrc)) {
+			err = PTR_ERR(oxnas->refsrc);
+			goto err_phyref;
+		}
+
+	} else {
+		oxnas->refsrc = NULL;
+		oxnas->phyref = NULL;
+	}
 
 	irq = irq_of_parse_and_map(np, 0);
 	if (!irq) {
@@ -177,37 +219,47 @@ static int ehci_oxnas_drv_probe(struct platform_device *ofdev)
 		goto err_irq;
 	}
 
-	hcd->regs = devm_ioremap_resource(&ofdev->dev, &res);
-	if (IS_ERR(hcd->regs)) {
-		dev_err(&ofdev->dev, "devm_ioremap_resource failed\n");
-		err = PTR_ERR(hcd->regs);
-		goto err_irq;
-	}
-
 	hcd->has_tt = 1;
 	ehci = hcd_to_ehci(hcd);
 	ehci->caps = hcd->regs;
 
-	start_oxnas_usb_ehci(ofdev);
+	start_oxnas_usb_ehci(oxnas);
 
 	err = usb_add_hcd(hcd, irq, IRQF_SHARED | IRQF_DISABLED);
 	if (err)
-		goto err_add_hcd;
+		goto err_hcd;
 
 	return 0;
 
-err_add_hcd:
-	stop_oxnas_usb_ehci();
+err_hcd:
+	stop_oxnas_usb_ehci(oxnas);
 err_irq:
+	if (oxnas->phyref) clk_put(oxnas->phyref);
+err_phyref:
+	if (oxnas->refsrc) clk_put(oxnas->refsrc);
+err_refsrc:
+	clk_put(oxnas->clk);
+err_clk:
+err_ioremap:
+err_res:
 	usb_put_hcd(hcd);
+
 	return err;
 }
 
 static int ehci_oxnas_drv_remove(struct platform_device *pdev)
 {
 	struct usb_hcd *hcd = platform_get_drvdata(pdev);
+	struct oxnas_hcd *oxnas = (struct oxnas_hcd *)hcd_to_ehci(hcd)->priv;
 
 	usb_remove_hcd(hcd);
+	if (oxnas->use_pllb) {
+		clk_disable_unprepare(oxnas->phyref);
+		clk_put(oxnas->phyref);
+		clk_disable_unprepare(oxnas->refsrc);
+		clk_put(oxnas->refsrc);
+	}
+	clk_disable_unprepare(oxnas->clk);
 	usb_put_hcd(hcd);
 
 	return 0;
@@ -228,6 +280,7 @@ static struct platform_driver ehci_oxnas_driver = {
 
 static const struct ehci_driver_overrides oxnas_overrides __initdata = {
 	.reset = ehci_oxnas_reset,
+	.extra_priv_size = sizeof(struct oxnas_hcd),
 };
 
 static int __init ehci_oxnas_init(void)
