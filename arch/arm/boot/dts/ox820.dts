@@ -15,7 +15,7 @@
 	interrupt-parent = <&gic>;
 
 	chosen {
-		bootargs = "console=ttyS0,115200n8 earlyprintk loglevel=15";
+		bootargs = "console=ttyS0,115200n8 root=/dev/sda2 rootfstype=ext4 ubi.mtd=data,512";
 	};
 
 	aliases {
