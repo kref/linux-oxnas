@@ -6,7 +6,9 @@
 #include <linux/slab.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
-#include <mach/clock.h>
+#include <linux/clk.h>
+
+#include <mach/utils.h>
 
 /* sgdma requst structure */
 typedef struct {
@@ -291,6 +293,7 @@ struct sata_oxnas_host_priv {
 	size_t dma_size;
 	int irq;
 	u32 port_in_eh;
+	struct clk *clk;
 };
 
 
@@ -497,7 +500,7 @@ static unsigned int sata_oxnas_qc_issue(struct ata_queued_cmd *qc)
 	sata_oxnas_tf_load(qc->ap, &qc->tf);
 
 	/* both pio and dma commands use dma */
-	if (ata_is_dma(qc->tf.protocol) || ata_is_pio(qc->tf.protocol) )
+	if (ata_is_dma(qc->tf.protocol) || ata_is_pio(qc->tf.protocol))
 	{
 		/* Start the DMA */
 		iowrite32(SGDMA_CONTROL_GO,	pd->sgdma_base + SGDMA_CONTROL);
@@ -557,8 +560,10 @@ static inline u32 sata_oxnas_hostdmabusy(struct ata_port* ap)
  */
 static void sata_oxnas_reset_core(struct ata_host *ah)
 {
+	struct sata_oxnas_host_priv *host_priv = ah->private_data;
+
 	DPRINTK("ENTER\n");
-	enable_clock(SYS_CTRL_CLK_SATA);
+	clk_prepare_enable(host_priv->clk);
 
 	block_reset(SYS_CTRL_RST_SATA, 1);
 	block_reset(SYS_CTRL_RST_SATA_LINK, 1);
@@ -643,7 +648,7 @@ static void sata_oxnas_tf_load(struct ata_port *ap, const struct ata_taskfile *t
 	modify the interrupt enable registers on the ata core as required */
 	if (tf->ctl & ATA_NIEN) {
 		/* interrupts disabled */
-		u32 mask = (COREINT_END << ap->port_no );
+		u32 mask = (COREINT_END << ap->port_no);
 		iowrite32(mask, port_priv->core_base + CORE_INT_DISABLE);
 		sata_oxnas_irq_clear(ap);
 	} else {
@@ -683,10 +688,10 @@ static void sata_oxnas_tf_load(struct ata_port *ap, const struct ata_taskfile *t
 	ap->last_ctl = tf->ctl;
 
 	/* write values to registers */
-	iowrite32(Orb1, port_base + ORB1 );
-	iowrite32(Orb2, port_base + ORB2 );
-	iowrite32(Orb3, port_base + ORB3 );
-	iowrite32(Orb4, port_base + ORB4 );
+	iowrite32(Orb1, port_base + ORB1);
+	iowrite32(Orb2, port_base + ORB2);
+	iowrite32(Orb3, port_base + ORB3);
+	iowrite32(Orb4, port_base + ORB4);
 }
 
 
@@ -896,12 +901,12 @@ void sata_oxnas_set_mode(struct ata_port* ap, u32 mode, u32 force)
 			wmb();
 
 			/* set the hardware up for RAID-1 */
-			iowrite32( 0, core_base + RAID_WP_BOT_LOW );
-			iowrite32( 0, core_base + RAID_WP_BOT_HIGH);
-			iowrite32( 0xffffffff, core_base + RAID_WP_TOP_LOW );
-			iowrite32( 0x7fffffff, core_base + RAID_WP_TOP_HIGH);
-			iowrite32( 0, core_base + RAID_SIZE_LOW );
-			iowrite32( 0, core_base + RAID_SIZE_HIGH );
+			iowrite32(0, core_base + RAID_WP_BOT_LOW);
+			iowrite32(0, core_base + RAID_WP_BOT_HIGH);
+			iowrite32(0xffffffff, core_base + RAID_WP_TOP_LOW);
+			iowrite32(0x7fffffff, core_base + RAID_WP_TOP_HIGH);
+			iowrite32(0, core_base + RAID_SIZE_LOW);
+			iowrite32(0, core_base + RAID_SIZE_HIGH);
 			wmb();
 			break;
 		case OXNASSATA_RAID0:
@@ -913,12 +918,12 @@ void sata_oxnas_set_mode(struct ata_port* ap, u32 mode, u32 force)
 			wmb();
 
 			/* set the hardware up for RAID-1 */
-			iowrite32( 0, core_base + RAID_WP_BOT_LOW );
-			iowrite32( 0, core_base + RAID_WP_BOT_HIGH);
-			iowrite32( 0xffffffff, core_base + RAID_WP_TOP_LOW );
-			iowrite32( 0x7fffffff, core_base + RAID_WP_TOP_HIGH);
-			iowrite32( 0xffffffff, core_base + RAID_SIZE_LOW );
-			iowrite32( 0x7fffffff, core_base + RAID_SIZE_HIGH );
+			iowrite32(0, core_base + RAID_WP_BOT_LOW);
+			iowrite32(0, core_base + RAID_WP_BOT_HIGH);
+			iowrite32(0xffffffff, core_base + RAID_WP_TOP_LOW);
+			iowrite32(0x7fffffff, core_base + RAID_WP_TOP_HIGH);
+			iowrite32(0xffffffff, core_base + RAID_SIZE_LOW);
+			iowrite32(0x7fffffff, core_base + RAID_SIZE_HIGH);
 			wmb();
 			break;
 		case OXNASSATA_NOTRAID:
@@ -994,7 +999,7 @@ cleanup_recovery_t sata_oxnas_cleanup(struct ata_host* ah)
 {
 	int actions_required = 0;
 
-	printk(KERN_ERR "ox820sata: reseting SATA core\n");
+	printk(KERN_INFO "ox820sata: reseting SATA core\n");
 
 	/* core not recovering, reset it */
 	mdelay(5);
@@ -1046,7 +1051,7 @@ static void sata_oxnas_post_internal_cmd(struct ata_queued_cmd *qc)
 static void sata_oxnas_irq_on(struct ata_port *ap)
 {
 	struct sata_oxnas_port_priv *pd = ap->private_data;
-	u32 mask = (COREINT_END << ap->port_no );
+	u32 mask = (COREINT_END << ap->port_no);
 
 	/* Clear pending interrupts */
 	iowrite32(~0, pd->port_base + INT_CLEAR);
@@ -1064,13 +1069,10 @@ int sata_oxnas_check_link(struct ata_port* ap)
 {
 	int reg;
 
-	sata_oxnas_scr_read_port(ap, SCR_STATUS, &reg );
+	sata_oxnas_scr_read_port(ap, SCR_STATUS, &reg);
 	/* Check for the cable present indicated by SCR status bit-0 set */
 	return (reg & 0x1);
 }
-
-
-
 
 /**
  *	ata_std_postreset - standard postreset callback
@@ -1094,7 +1096,7 @@ static void sata_oxnas_postreset(struct ata_link *link, unsigned int *classes)
 	ata_std_postreset(link, classes);
 
 	/* turn on phy error detection by removing the masks */
-	sata_oxnas_link_write(ap , 0x0c, 0x30003 );
+	sata_oxnas_link_write(ap , 0x0c, 0x30003);
 
 	/* bail out if no device is present */
 	if (classes[0] == ATA_DEV_NONE && classes[1] == ATA_DEV_NONE) {
@@ -1111,7 +1113,6 @@ static void sata_oxnas_postreset(struct ata_link *link, unsigned int *classes)
 
 	DPRINTK("EXIT\n");
 }
-
 
 /**
  * Called to read the hardware registers / DMA buffers, to
@@ -1204,9 +1205,6 @@ static int sata_oxnas_qc_new(struct ata_port *ap)
 	return hd->port_in_eh;
 }
 
-
-
-
 /**
  * Prepare as much as possible for a command without involving anything that is
  * shared between ports.
@@ -1225,7 +1223,7 @@ static void sata_oxnas_qc_prep(struct ata_queued_cmd* qc)
 	}
 	*/
 	/* both pio and dma commands use dma */
-	if (ata_is_dma(qc->tf.protocol) || ata_is_pio(qc->tf.protocol) )
+	if (ata_is_dma(qc->tf.protocol) || ata_is_pio(qc->tf.protocol))
 	{
 
 		/* program the scatterlist into the prd table */
@@ -1234,7 +1232,7 @@ static void sata_oxnas_qc_prep(struct ata_queued_cmd* qc)
 		/* point the sgdma controller at the dma request structure */
 		pd = qc->ap->private_data;
 
-		iowrite32(pd->sgdma_request_pa, pd->sgdma_base + SGDMA_REQUESTPTR );
+		iowrite32(pd->sgdma_request_pa, pd->sgdma_base + SGDMA_REQUESTPTR);
 
 		/* setup the request table */
 		if (port_no == 0) {
@@ -1457,7 +1455,7 @@ static int sata_oxnas_softreset(struct ata_link *link, unsigned int *class,
 		*class = ATA_DEV_NONE;
 	}
  out:
-	DPRINTK("EXIT, class=%u\n", *class );
+	DPRINTK("EXIT, class=%u\n", *class);
 	return 0;
 }
 
@@ -1466,7 +1464,6 @@ int	sata_oxnas_init_controller(struct ata_host *host)
 {
 	return 0;
 }
-
 
 /**
  * Ref bug-6320
@@ -1563,7 +1560,7 @@ static void sata_oxnas_port_irq(struct ata_port* ap, int force_error)
 		ata_qc_complete(qc);
 	} else {
 		VPRINTK("Ignoring interrupt, can't find the command tag= %d %08x\n",
-				ap->link.active_tag, ap->qc_active );
+				ap->link.active_tag, ap->qc_active);
 	}
 
 	/* maybe a hotplug event */
@@ -1594,7 +1591,7 @@ static irqreturn_t sata_oxnas_interrupt(int irq, void *dev_instance)
 	int bug_present;
 
 	/* loop until there are no more interrupts */
-	while ( (int_status = ioread32(core_base + CORE_INT_STATUS)) & COREINT_END ) {
+	while ((int_status = ioread32(core_base + CORE_INT_STATUS)) & COREINT_END) {
 
 		/* clear any interrupt */
 		iowrite32(int_status, core_base + CORE_INT_CLEAR);
@@ -1680,6 +1677,7 @@ static int sata_oxnas_probe(struct platform_device *ofdev)
 	struct sata_oxnas_host_priv *host_priv = NULL;
 	int irq = 0;
 	struct ata_host *host = NULL;
+	struct clk *clk = NULL;
 	u32 version;
 
 	const struct ata_port_info *ppi[] = { &sata_oxnas_port_info, NULL };
@@ -1704,8 +1702,6 @@ static int sata_oxnas_probe(struct platform_device *ofdev)
 	if (!phy_base)
 		goto error_exit_with_cleanup;
 
-
-
 	host_priv = devm_kzalloc(&ofdev->dev, sizeof(struct sata_oxnas_host_priv), GFP_KERNEL);
 	if (!host_priv)
 		goto error_exit_with_cleanup;
@@ -1726,6 +1722,14 @@ static int sata_oxnas_probe(struct platform_device *ofdev)
 		goto error_exit_with_cleanup;
 	}
 	host_priv->irq = irq;
+
+	clk = of_clk_get(ofdev->dev.of_node, 0);
+	if (IS_ERR(clk)) {
+		retval = PTR_ERR(clk);
+		clk = NULL;
+		goto error_exit_with_cleanup;
+	}
+	host_priv->clk = clk;
 
 	/* allocate host structure */
 	host = ata_host_alloc_pinfo(&ofdev->dev, ppi, SATA_OXNAS_MAX_PORTS);
@@ -1756,6 +1760,8 @@ static int sata_oxnas_probe(struct platform_device *ofdev)
 error_exit_with_cleanup:
 	if (irq)
 		irq_dispose_mapping(host_priv->irq);
+	if (clk)
+		clk_put(clk);
 	if (host)
 		ata_host_detach(host);
 	if (port_base)
@@ -1788,7 +1794,8 @@ static int sata_oxnas_remove(struct platform_device *ofdev)
 	block_reset(SYS_CTRL_RST_SATA_PHY, 1);
 
 	// Disable the clock to the SATA block
-	disable_clock(SYS_CTRL_CLK_SATA);
+	clk_disable_unprepare(host_priv->clk);
+	clk_put(host_priv->clk);
 
 	return 0;
 }
@@ -1847,5 +1854,5 @@ module_platform_driver(oxnas_sata_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_VERSION("1.0");
-MODULE_AUTHOR( "Oxford Semiconductor Ltd.");
+MODULE_AUTHOR("Oxford Semiconductor Ltd.");
 MODULE_DESCRIPTION("934 SATA core controler");

@@ -55,7 +55,6 @@
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency  = <25000000>;
-		clock-output-names = "osc";
 	};
 
 	sysclk: sysclk {
@@ -64,23 +63,26 @@
 		clock-div = <4>;
 		clock-mult = <1>;
 		clocks = <&osc>;
-		clock-output-names = "sysclk";
 	};
 
 	plla: pll@44e001f0 {
 		compatible = "plxtech,nas782x-plla";
-		#clock-cells = <1>;
-		clocks = <&osc 0>;
-		clock-names = "osc";
+		#clock-cells = <0>;
+		clocks = <&osc>;
 		reg = <0x44e001f0 0x10>;
-		clock-output-names = "pll", "pll-switched";
 	};
 
-	fackpll: fackpll {
-		compatible = "fixed-clock";
+	pllb: pll@44f001f0 {
+		compatible = "plxtech,nas782x-pllb";
 		#clock-cells = <0>;
-		clock-frequency  = <800000000>;
-		clock-output-names = "fackpll";
+		clocks = <&osc>;
+		reg = <0x44f001f0 0x10>;
+	};
+
+	stdclk: stdclk {
+		compatible = "plxtech,nas782x-stdclk";
+		#clock-cells = <1>;
+		clocks = <&osc>;
 	};
 
 	twdclk: twdclk {
@@ -88,17 +90,14 @@
 		#clock-cells = <0>;
 		clock-div = <2>;
 		clock-mult = <1>;
-		clocks = <&fackpll>;
-		clock-output-names = "twdclk";
+		clocks = <&plla>;
 	};
 
 	gmacclk: gmacclk {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency  = <125000000>;
-		clock-output-names = "gmacclk";
 	};
-
 
 	pinctrl {
 		/* act as a simple bus, so children will be probed automatically */
@@ -183,7 +182,7 @@
 				0x81000000	0 0x4BE00000	0x4BE00000	0 0x0100000
 				0x80000000	0 0x4BF00000	0x4BF00000	0 0x0100000>;
 
-		bus-range = <0x00 0xff>;
+		bus-range = <0x00 0x7f>;
 
 		/*	cfg			inbound translator	phy*/
 		reg =	<0x47C00000 0x1000>,	<0x47D00000 0x100>,	 <0x44A00000 0x10>;
@@ -195,10 +194,11 @@
 		interrupt-map-mask = <0 0 0 0>;
 		/* format: a list of: bus address, interrupt specifier, 
 		 * parent interrupt controller & specifier */
-		interrupt-map = <0 0 0 0 &gic 19>;
+		interrupt-map = <0 0 0 0 &gic 0 19 0x304>;
 
 		gpios = <&GPIOB 12 0>;
-		//clocks = <&xxxx 5>;
+		clocks = <&stdclk 8>, <&pllb>;
+		clock-names = "pcie", "busclk";
 
 		plxtech,pcie-hcsl-bit = <2>;
 		plxtech,pcie-reset-bit = <7>;
@@ -218,7 +218,7 @@
 				0x81000000	0 0x4FE00000	0x4FE00000	0 0x0100000
 				0x80000000	0 0x4FF00000	0x4FF00000	0 0x0100000>;
 
-		bus-range = <0x00 0xff>;
+		bus-range = <0x80 0xff>;
 
 		/*	cfg			inbound translator	phy*/
 		reg =	<0x47E00000 0x1000>,	<0x47F00000 0x100>,	<0x44A00000 0x10>;
@@ -230,15 +230,17 @@
 		interrupt-map-mask = <0 0 0 0>;
 		/* format: a list of: bus address, interrupt specifier, 
 		 * parent interrupt controller & specifier */
-		interrupt-map = <0 0 0 0 &gic 20>;
+		interrupt-map = <0 0 0 0 &gic 0 20 0x304>;
 
 		/* gpios = <&GPIOB 12 0>; */
-		//clocks = <&xxxx 5>;
+		clocks = <&stdclk 11>, <&pllb>;
+		clock-names = "pcie", "busclk";
 
 		plxtech,pcie-hcsl-bit = <3>;
 		plxtech,pcie-reset-bit = <23>;
 		plxtech,pcie-ctrl-offset = <0x124>;
 		plxtech,pcie-outbound-offset = <0x174>;
+		status = "disabled";
 	};
 	
 	local-timer@47000600 {
@@ -284,6 +286,7 @@
 			/*	phy		descriptors (optional)	*/
 			<0x44900000 0x0C>, <0x50000000 0x1000>;
 		interrupts = <0 18 0x304>;
+		clocks = <&stdclk 4>;
 	};
 
 	gmac: ethernet@40400000 {
@@ -293,7 +296,7 @@
 		interrupt-names = "macirq", "eth_wake_irq";
 		mac-address = [000000000000]; /* Filled in by U-Boot */
 		phy-mode = "rgmii";
-		clocks = <&gmacclk>;
+		clocks = <&stdclk 7>;
 		clock-names = "stmmaceth";
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_gmac0>;
@@ -303,6 +306,8 @@
 		compatible = "plxtch,nas782x-ehci";
 		reg = <0x40200100 0xf00>;
 		interrupts = <0 7 0x304>;
-		use_pllb_clk;
+		clocks = <&stdclk 6>, <&pllb>, <&stdclk 12>;
+		clock-names = "usb", "refsrc", "phyref";
+		plxtch,ehci_use_pllb;
 	};
 };

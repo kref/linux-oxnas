@@ -20,13 +20,15 @@
 #include <linux/of_gpio.h>
 #include <linux/gpio.h>
 #include <linux/delay.h>
+#include <linux/clk.h>
 #include <mach/iomap.h>
 #include <mach/hardware.h>
-#include <mach/clock.h>
+#include <mach/utils.h>
 
 #define VERSION_ID_MAGIC		0x082510b5
-#define LINK_UP_TIMEOUT_SECONDS		3
+#define LINK_UP_TIMEOUT_SECONDS		1
 #define NUM_CONTROLLERS			1
+
 enum {
 	PCIE_DEVICE_TYPE_NASK = 0x0F,
 	PCIE_DEVICE_TYPE_ENDPOINT = 0,
@@ -61,7 +63,6 @@ enum {
 	PCI_CONFIG_VERSION_DEVICEID = 0,
 	PCI_CONFIG_COMMAND_STATUS = 4,
 };
-
 
 /* inbound config registers */
 enum {
@@ -123,46 +124,16 @@ struct oxnas_pcie {
 	struct resource busn;		/* max available bus numbers */
 	int card_reset;			/* gpio pin, optional */
 	unsigned hcsl_en;		/* hcsl pci enable bit */
+	struct clk *clk;
+	struct clk *busclk;		/* for pcie bus, actually the PLLB */
 	unsigned core_reset;		/* reset bit in sys ctl */
 	void *private_data[1];
 	spinlock_t lock;
 };
 
-
-struct oxnas_pcie_port {
-
-	spinlock_t conf_lock;
-	int devfn;
-	struct clk *clk;
-};
-
 static struct oxnas_pcie_shared pcie_shared = {
 	.refcount = 0,
 };
-
-static inline void oxnas_register_clear_mask(void __iomem *p, unsigned mask)
-{
-	u32 val = readl_relaxed(p);
-	val &= ~mask;
-	writel_relaxed(val, p);
-}
-
-static inline void oxnas_register_set_mask(void __iomem *p, unsigned mask)
-{
-	u32 val = readl_relaxed(p);
-	val |= mask;
-	writel_relaxed(val, p);
-}
-
-static inline void oxnas_register_value_mask(void __iomem *p, unsigned mask,
-                                             unsigned new_value)
-{
-	/* TODO sanity check mask & new_value = new_value */
-	u32 val = readl_relaxed(p);
-	val &= ~mask;
-	val |= new_value;
-	writel_relaxed(val, p);
-}
 
 static inline struct oxnas_pcie *sys_to_pcie(struct pci_sys_data *sys)
 {
@@ -200,6 +171,7 @@ static void __init oxnas_pcie_setup_hw(struct oxnas_pcie *pcie)
 	oxnas_register_clear_mask(pcie->inbound + IB_ADDR_XLATE_ENABLE,
 	                          ENABLE_IN_ADDR_TRANS);
 	wmb();
+
 	/*
 	 * Program outbound translation windows
 	 *
@@ -302,11 +274,14 @@ static int oxnas_pcie_wr_conf(struct pci_bus *bus, u32 devfn,
 
 	value = val << (8 * (where & 3));
 	lanes =  (0xf >> (4-size)) << (where & 3);
-
+	/* it race with mem and io write, but the possibility is low, normally
+	 * all config writes happens at driver initialize stage, wont interleave with
+	 * others. * and many pcie cards use dword (4bytes) access mem/io access only,
+	 * so not bother to copy that ugly walk around now. */
 	spin_lock_irqsave(&pcie->lock, flags);
 	set_out_lanes(pcie, lanes);
 	writel_relaxed(value, pcie->cfgbase + offset);
-//	set_out_lanes(pcie, 0xf);
+	set_out_lanes(pcie, 0xf);
 	spin_unlock_irqrestore(&pcie->lock, flags);
 
 	return PCIBIOS_SUCCESSFUL;
@@ -352,12 +327,16 @@ static int __init oxnas_pcie_setup(int nr, struct pci_sys_data *sys)
 {
 	struct oxnas_pcie *pcie = sys_to_pcie(sys);
 
-	pci_add_resource_offset(&sys->resources, &pcie->io, sys->io_offset);
-	pci_add_resource_offset(&sys->resources, &pcie->pre_mem, sys->mem_offset);
 	pci_add_resource_offset(&sys->resources, &pcie->non_mem, sys->mem_offset);
+	pci_add_resource_offset(&sys->resources, &pcie->pre_mem, sys->mem_offset);
+	pci_add_resource_offset(&sys->resources, &pcie->io, sys->io_offset);
 	pci_add_resource(&sys->resources, &pcie->busn);
-
-	pcie->cfgbase = devm_ioremap_resource(&pcie->pdev->dev, &pcie->cfg);
+	if (sys->busnr == 0) { /* default one */
+		sys->busnr = pcie->busn.start;
+	}
+	/* do not use devm_ioremap_resource, it does not like cfg resource */
+	pcie->cfgbase = devm_ioremap(&pcie->pdev->dev, pcie->cfg.start,
+	                             resource_size(&pcie->cfg));
 	if(!pcie->cfgbase)
 		return -ENOMEM;
 
@@ -379,12 +358,7 @@ static int __init oxnas_pcie_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 				     oirq.size);
 }
 
-static struct pci_bus *oxnas_pcie_scan_bus(int nr, struct pci_sys_data *sys)
-{
-	return 0;
-}
-
-static void __init oxnas_pcie_enable(struct oxnas_pcie *pcie)
+static void __init oxnas_pcie_enable(struct device* dev, struct oxnas_pcie *pcie)
 {
 	struct hw_pci hw;
 	int i;
@@ -398,17 +372,16 @@ static void __init oxnas_pcie_enable(struct oxnas_pcie *pcie)
 	/* I think use stack pointer is a bad idea though it is valid in this case */
 	hw.private_data   = pcie->private_data;
 	hw.setup          = oxnas_pcie_setup;
-	//hw.scan           = oxnas_pcie_scan_bus;
 	hw.map_irq        = oxnas_pcie_map_irq;
 	hw.ops            = &oxnas_pcie_ops;
-	//hw.align_resource = oxnas_pcie_align_resource;
-	//hw.preinit........=.oxnas_pcie_preinit;
-	pci_common_init(&hw);
+
+	/* pass dev to maintain of tree, interrupt mapping rely on this */
+	pci_common_init_dev(dev, &hw);
 }
 
 void oxnas_pcie_init_shared_hw(void __iomem *phybase)
 {
-	/* generate clocks from HCSL buffers */
+	/* generate clocks from HCSL buffers, shared parts */
 	writel(HCSL_BIAS_ON|HCSL_PCIE_EN, SYS_CTRL_HCSL_CTRL);
 
 	/* Ensure PCIe PHY is properly reset */
@@ -435,6 +408,7 @@ static int oxnas_pcie_shared_init(struct platform_device *pdev)
 	}
 }
 
+/* maybe we will call it when enter low power state */
 static void oxnas_pcie_shared_deinit(struct platform_device *pdev)
 {
 	if(--pcie_shared.refcount == 0) {
@@ -489,7 +463,6 @@ static int __init oxnas_pcie_init_res(struct platform_device *pdev,
 	struct of_pci_range_parser parser;
 	int ret;
 
-
 	if (of_pci_range_parser_init(&parser, np))
 		return -EINVAL;
 
@@ -500,12 +473,6 @@ static int __init oxnas_pcie_init_res(struct platform_device *pdev,
 		if (restype == IORESOURCE_IO) {
 			of_pci_range_to_resource(&range, np, &pcie->io);
 			pcie->io.name = "I/O";
-			pcie->io.start = max_t(resource_size_t,
-					     PCIBIOS_MIN_IO,
-					     range.pci_addr);
-			pcie->io.end = min_t(resource_size_t,
-					   IO_SPACE_LIMIT,
-					   range.pci_addr + range.size);
 		}
 		if (restype == IORESOURCE_MEM) {
 			if (range.flags & IORESOURCE_PREFETCH) {
@@ -542,6 +509,17 @@ static int __init oxnas_pcie_init_res(struct platform_device *pdev,
 	if (of_property_read_u32(np, "plxtech,pcie-reset-bit", &pcie->core_reset))
 		return -EINVAL;
 
+	pcie->clk = of_clk_get_by_name(np, "pcie");
+	if (IS_ERR(pcie->clk)) {
+		return PTR_ERR(pcie->clk);
+	}
+
+	pcie->busclk = of_clk_get_by_name(np, "busclk");
+	if (IS_ERR(pcie->busclk)) {
+		clk_put(pcie->clk);
+		return PTR_ERR(pcie->busclk);
+	}
+
 	return 0;
 }
 
@@ -549,55 +527,52 @@ static void oxnas_pcie_init_hw(struct platform_device *pdev,
                                      struct oxnas_pcie *pcie)
 {
 	u32 version_id;
-	/* pllb is potentially shared, better model it as a clock */
 
-	block_reset(SYS_CTRL_RST_PLLB, 0);
-	// set PLL B control information
-	writel(0x218, SEC_CTRL_PLLB_CTRL0);
-
-	oxnas_register_set_mask(SYS_CTRL_HCSL_CTRL, BIT(pcie->hcsl_en));
+	clk_prepare_enable(pcie->busclk);
 
 	/* reset PCIe cards use hard-wired gpio pin */
 	if(pcie->card_reset >=0 && !gpio_direction_output(pcie->card_reset, 0))
 	{
 		wmb();
-		mdelay(500);
+		mdelay(10);
 		/* must tri-state the pin to pull it up */
 		gpio_direction_input(pcie->card_reset);
 		wmb();
+		mdelay(100);
 	}
 
+	oxnas_register_set_mask(SYS_CTRL_HCSL_CTRL, BIT(pcie->hcsl_en));
+
+	/* core */
 	block_reset(pcie->core_reset, 1);
 	block_reset(pcie->core_reset, 0);
 
-	/* turn to clock framework later */
 	/* Start PCIe core clocks */
-	enable_clock(SYS_CTRL_CLK_PCIEA);
-
-	// allow entry to L23 state *************** */
-	oxnas_register_set_mask(pcie->pcie_ctrl, PCIE_READY_ENTR_L23);
-
+	clk_prepare_enable(pcie->clk);
 
 	version_id = readl_relaxed(pcie->base + PCI_CONFIG_VERSION_DEVICEID);
-	dev_info(&pdev->dev, "PCIeA version/deviceID 0x%x\n", version_id);
+	dev_info(&pdev->dev, "PCIe version/deviceID 0x%x\n", version_id);
 
 	if (version_id != VERSION_ID_MAGIC) {
-		dev_info(&pdev->dev, "PCIeA controller not found\n");
+		dev_info(&pdev->dev, "PCIe controller not found\n");
 		pcie->haslink = 0;
 		return;
 	}
+
+	/* allow entry to L23 state */
+	oxnas_register_set_mask(pcie->pcie_ctrl, PCIE_READY_ENTR_L23);
+
 	/* Set PCIe core into RootCore mode */
 	oxnas_register_value_mask(pcie->pcie_ctrl, PCIE_DEVICE_TYPE_NASK,
 	                          PCIE_DEVICE_TYPE_ROOT);
-
 	wmb();
-	/* really need reset again ?? */
+
 	/* Bring up the PCI core */
 	oxnas_register_set_mask(pcie->pcie_ctrl, PCIE_LTSSM);
 	wmb();
 
 	/* hope run these twice cause no harm */
-	/* Enable PCIe Pre-Emphasis: */
+	/* Enable PCIe Pre-Emphasis: What these value means? */
 	writel(ADDR_VAL(0x0014), pcie_shared.phybase + PHY_ADDR);
 	writel(DATA_VAL(0xce10) | CAP_DATA, pcie_shared.phybase + PHY_DATA);
 	writel(DATA_VAL(0xce10) | WRITE_EN, pcie_shared.phybase + PHY_DATA);
@@ -655,8 +630,9 @@ static int __init oxnas_pcie_probe(struct platform_device *pdev)
 		pcie->haslink = 0;
 		dev_info(&pdev->dev, "link down\n");
 	}
-
-	oxnas_pcie_enable(pcie);
+	/* should we register our controller even when pcie->haslink is 0 ? */
+	/* register the controller with framework */
+	oxnas_pcie_enable(&pdev->dev, pcie);
 
 	return 0;
 
