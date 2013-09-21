@@ -289,6 +289,29 @@
 		clocks = <&stdclk 4>;
 	};
 
+	nand@41000000 {
+		compatible = "plxtech,nand-nas782x", "gen_nand";
+		reg = <0x41000000 0x100000>, <0x41C00000 0x20>;
+		nand-ecc-mode = "soft";
+		clocks = <&stdclk 9>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_nand0>;
+
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		partition@0 {
+			label = "boot";
+			reg = <0x00000000 0x00e00000>;
+			/*read-only;*/
+		};
+
+		partition@e00000 {
+			label = "data";
+			reg = <0x00e00000 0x07200000>;
+		};
+	};
+
 	gmac: ethernet@40400000 {
 		compatible = "snps,dwmac";
 		reg = <0x40400000 0x2000>;
