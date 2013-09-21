@@ -9,7 +9,7 @@
 #include <asm/mach/arch.h>
 #include <asm/page.h>
 #include <mach/iomap.h>
-#include <mach/clock.h>
+#include <mach/hardware.h>
 
 extern struct smp_operations ox820_smp_ops;
 

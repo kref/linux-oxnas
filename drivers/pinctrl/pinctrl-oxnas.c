@@ -29,6 +29,8 @@
 
 #include "core.h"
 
+#include <mach/utils.h>
+
 #define MAX_NB_GPIO_PER_BANK	32
 #define MAX_GPIO_BANKS		2
 
@@ -150,30 +152,6 @@ struct oxnas_pinctrl {
 	struct oxnas_pin_group	*groups;
 	int			ngroups;
 };
-
-
-void oxnas_register_clear_mask(void __iomem *p, unsigned mask)
-{
-	u32 val = readl_relaxed(p);
-	val &= ~mask;
-	writel_relaxed(val, p);
-}
-
-void oxnas_register_set_mask(void __iomem *p, unsigned mask)
-{
-	u32 val = readl_relaxed(p);
-	val |= mask;
-	writel_relaxed(val, p);
-}
-
-void oxnas_register_value_mask(void __iomem *p, unsigned mask, unsigned new_value)
-{
-	/* TODO sanity check mask & new_value = new_value */
-	u32 val = readl_relaxed(p);
-	val &= ~mask;
-	val |= new_value;
-	writel_relaxed(val, p);
-}
 
 static const inline struct oxnas_pin_group *oxnas_pinctrl_find_group_by_name(
 				const struct oxnas_pinctrl *info,
