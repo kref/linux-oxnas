@@ -1,5 +1,5 @@
 #ifndef _NAS782X_UTILS_H
-#define _NAS782X_CLOCK_H
+#define _NAS782X_UTILS_H
 
 #include <linux/io.h>
 #include <mach/hardware.h>
