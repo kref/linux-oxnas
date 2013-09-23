@@ -229,6 +229,8 @@ void __init oxnas_init_plla(struct device_node *np)
 
 	clk = clk_register(NULL, &plla_hw);
 	BUG_ON(IS_ERR(clk));
+	/* mark it as enabled */
+	clk_prepare_enable(clk);
 	of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
 CLK_OF_DECLARE(oxnas_plla, "plxtech,nas782x-plla", oxnas_init_plla);
