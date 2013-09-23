@@ -65,14 +65,14 @@
 		clocks = <&osc>;
 	};
 
-	plla: pll@44e001f0 {
+	plla: plla@44e001f0 {
 		compatible = "plxtech,nas782x-plla";
 		#clock-cells = <0>;
 		clocks = <&osc>;
 		reg = <0x44e001f0 0x10>;
 	};
 
-	pllb: pll@44f001f0 {
+	pllb: pllb@44f001f0 {
 		compatible = "plxtech,nas782x-pllb";
 		#clock-cells = <0>;
 		clocks = <&osc>;
@@ -242,7 +242,7 @@
 		plxtech,pcie-outbound-offset = <0x174>;
 		status = "disabled";
 	};
-	
+
 	local-timer@47000600 {
 		compatible = "arm,arm11mp-twd-timer";
 		reg = <0x47000600 0x20>;
