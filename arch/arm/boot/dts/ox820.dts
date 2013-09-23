@@ -331,6 +331,10 @@
 		interrupts = <0 7 0x304>;
 		clocks = <&stdclk 6>, <&pllb>, <&stdclk 12>;
 		clock-names = "usb", "refsrc", "phyref";
+
+		/* Otherwise ref300 is used, which is derived from sata phy
+		 * in that case, usb depends on sata initialization */
+		/* FIXME: how to make this dependency explicit ? */
 		plxtch,ehci_use_pllb;
 	};
 };
