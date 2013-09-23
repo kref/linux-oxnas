@@ -45,19 +45,7 @@
 #include <asm/smp_plat.h>
 #include <asm/delay.h>
 #include <mach/iomap.h>
-
-extern void ox820_secondary_startup(void);
-extern void ox820_cpu_die(unsigned int cpu);
-
-static void __cpuinit write_pen_release(int val)
-{
-	writel(val, HOLDINGPEN_CPU);
-}
-
-static int __cpuinit read_pen_release(void)
-{
-	return readl(HOLDINGPEN_CPU);
-}
+#include <mach/smp.h>
 
 static DEFINE_SPINLOCK(boot_lock);
 
