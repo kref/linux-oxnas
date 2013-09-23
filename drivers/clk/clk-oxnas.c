@@ -44,8 +44,7 @@ static unsigned long plla_clk_recalc_rate(struct clk_hw *hw,
 
 	/* seems we will not be here when pll is bypassed, so ignore this case */
 
-	WARN_ON(fin % MHZ);
-	return fin / MHZ * fbdiv / refdiv / outdiv * MHZ;
+	return fin / MHZ * fbdiv / (refdiv * outdiv) / 32768 * MHZ;
 }
 
 static const char *pll_clk_parents[] = {
