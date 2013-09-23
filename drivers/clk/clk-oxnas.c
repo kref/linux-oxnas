@@ -123,14 +123,12 @@ struct clk_std {
 static int std_clk_is_enabled(struct clk_hw *hw)
 {
 	struct clk_std *std = to_stdclk(hw);
-	early_printk("%s %d\n", __func__, std->bit);
 	return readl_relaxed(SYSCTRL_CLK_STAT) & BIT(std->bit);
 }
 
 static int std_clk_enable(struct clk_hw *hw)
 {
 	struct clk_std *std = to_stdclk(hw);
-	early_printk("%s %d\n", __func__, std->bit);
 	writel(BIT(std->bit), SYS_CTRL_CLK_SET_CTRL);
 	return 0;
 }
@@ -138,7 +136,6 @@ static int std_clk_enable(struct clk_hw *hw)
 static void std_clk_disable(struct clk_hw *hw)
 {
 	struct clk_std *std = to_stdclk(hw);
-	early_printk("%s %d\n", __func__, std->bit);
 	writel(BIT(std->bit), SYS_CTRL_CLK_CLR_CTRL);
 }
 
