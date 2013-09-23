@@ -14,8 +14,8 @@
 
 #include <asm/cp15.h>
 #include <asm/smp_plat.h>
+#include <mach/smp.h>
 
-#if 1
 static inline void cpu_enter_lowpower(void)
 {
 	unsigned int v;
@@ -68,7 +68,7 @@ static inline void platform_do_lowpower(unsigned int cpu, int *spurious)
 		    :
 		    : "memory", "cc");
 
-		if (pen_release == cpu_logical_map(cpu)) {
+		if (read_pen_release() == cpu_logical_map(cpu)) {
 			/*
 			 * OK, proper wakeup, we're done
 			 */
@@ -85,56 +85,7 @@ static inline void platform_do_lowpower(unsigned int cpu, int *spurious)
 		(*spurious)++;
 	}
 }
-#else
-#include <asm/cacheflush.h>
-static inline void cpu_enter_lowpower(void)
-{
-	unsigned int v;
 
-	flush_cache_all();
-	asm volatile(
-	"	mcr	p15, 0, %1, c7, c5, 0\n"
-	"	mcr	p15, 0, %1, c7, c10, 4\n"
-	/*
-	 * Turn off coherency
-	 */
-	"	mrc	p15, 0, %0, c1, c0, 1\n"
-	"	bic	%0, %0, #0x20\n"
-	"	mcr	p15, 0, %0, c1, c0, 1\n"
-	"	mrc	p15, 0, %0, c1, c0, 0\n"
-	"	bic	%0, %0, #0x04\n"
-	"	mcr	p15, 0, %0, c1, c0, 0\n"
-	  : "=&r" (v)
-	  : "r" (0)
-	  : "cc");
-}
-
-static inline void cpu_leave_lowpower(void)
-{
-	unsigned int v;
-
-	asm volatile(	"mrc	p15, 0, %0, c1, c0, 0\n"
-	"	orr	%0, %0, #0x04\n"
-	"	mcr	p15, 0, %0, c1, c0, 0\n"
-	"	mrc	p15, 0, %0, c1, c0, 1\n"
-	"	orr	%0, %0, #0x20\n"
-	"	mcr	p15, 0, %0, c1, c0, 1\n"
-	  : "=&r" (v)
-	  :
-	  : "cc");
-}
-
-static inline void platform_do_lowpower(unsigned int cpu, int *spurious)
-{
-	/* Copied from Realview where they use a pen_release variable to tell if
-	   the CPU has been intentionally woken from interrupt. They don't do
-	   anything if the wake is unintentional, so may as well ignore for now */
-	asm(".word	0xe320f003\n"
-		:
-		:
-		: "memory", "cc");
-}
-#endif
 /*
  * platform-specific code to shutdown a CPU
  *
