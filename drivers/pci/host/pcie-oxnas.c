@@ -103,8 +103,6 @@ struct oxnas_pcie_shared
 {
 	/* seems all access are serialized, no lock required */
 	int refcount;
-	void __iomem *phybase;	/* phy is shared by all controllers */
-
 };
 
 /* Structure representing one PCIe interfaces */
@@ -277,7 +275,7 @@ static int oxnas_pcie_wr_conf(struct pci_bus *bus, u32 devfn,
 	/* it race with mem and io write, but the possibility is low, normally
 	 * all config writes happens at driver initialize stage, wont interleave with
 	 * others. * and many pcie cards use dword (4bytes) access mem/io access only,
-	 * so not bother to copy that ugly walk around now. */
+	 * so not bother to copy that ugly work-around now. */
 	spin_lock_irqsave(&pcie->lock, flags);
 	set_out_lanes(pcie, lanes);
 	writel_relaxed(value, pcie->cfgbase + offset);
@@ -387,6 +385,16 @@ void oxnas_pcie_init_shared_hw(void __iomem *phybase)
 	/* Ensure PCIe PHY is properly reset */
 	block_reset(SYS_CTRL_RST_PCIEPHY, 1);
 	block_reset(SYS_CTRL_RST_PCIEPHY, 0);
+
+	/* Enable PCIe Pre-Emphasis: What these value means? */
+
+	writel(ADDR_VAL(0x0014), phybase + PHY_ADDR);
+	writel(DATA_VAL(0xce10) | CAP_DATA, phybase + PHY_DATA);
+	writel(DATA_VAL(0xce10) | WRITE_EN, phybase + PHY_DATA);
+
+	writel(ADDR_VAL(0x2004), phybase + PHY_ADDR);
+	writel(DATA_VAL(0x82c7) | CAP_DATA, phybase + PHY_DATA);
+	writel(DATA_VAL(0x82c7) | WRITE_EN, phybase + PHY_DATA);
 }
 
 static int oxnas_pcie_shared_init(struct platform_device *pdev)
@@ -401,7 +409,7 @@ static int oxnas_pcie_shared_init(struct platform_device *pdev)
 			return -ENOMEM;
 		}
 		oxnas_pcie_init_shared_hw(phy);
-		pcie_shared.phybase = phy;
+		iounmap(phy);
 		return 0;
 	} else {
 		return 0;
@@ -412,8 +420,7 @@ static int oxnas_pcie_shared_init(struct platform_device *pdev)
 static void oxnas_pcie_shared_deinit(struct platform_device *pdev)
 {
 	if(--pcie_shared.refcount == 0) {
-		iounmap(pcie_shared.phybase);
-		pcie_shared.phybase = 0;
+		/* no cleanup needed */;
 	}
 }
 
@@ -570,16 +577,6 @@ static void oxnas_pcie_init_hw(struct platform_device *pdev,
 	/* Bring up the PCI core */
 	oxnas_register_set_mask(pcie->pcie_ctrl, PCIE_LTSSM);
 	wmb();
-
-	/* hope run these twice cause no harm */
-	/* Enable PCIe Pre-Emphasis: What these value means? */
-	writel(ADDR_VAL(0x0014), pcie_shared.phybase + PHY_ADDR);
-	writel(DATA_VAL(0xce10) | CAP_DATA, pcie_shared.phybase + PHY_DATA);
-	writel(DATA_VAL(0xce10) | WRITE_EN, pcie_shared.phybase + PHY_DATA);
-
-	writel(ADDR_VAL(0x2004), pcie_shared.phybase + PHY_ADDR);
-	writel(DATA_VAL(0x82c7) | CAP_DATA, pcie_shared.phybase + PHY_DATA);
-	writel(DATA_VAL(0x82c7) | WRITE_EN, pcie_shared.phybase + PHY_DATA);
 }
 
 static int __init oxnas_pcie_probe(struct platform_device *pdev)
