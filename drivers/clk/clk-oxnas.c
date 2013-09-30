@@ -22,6 +22,7 @@
 #include <linux/clk-provider.h>
 #include <linux/of.h>
 #include <linux/delay.h>
+#include <linux/stringify.h>
 #include <asm/io.h>
 #include <mach/hardware.h>
 #include <mach/utils.h>
@@ -117,8 +118,6 @@ struct clk_std {
 
 #define NUM_STD_CLKS 17
 #define to_stdclk(_hw) container_of(_hw, struct clk_std, hw)
-#define _STRINGIFY(x) #x
-#define STRINGIFY(x) _STRINGIFY(x)
 
 static int std_clk_is_enabled(struct clk_hw *hw)
 {
@@ -155,7 +154,7 @@ static const char *eth_parents[] = {
 
 #define DECLARE_STD_CLKP(__clk, __bit, __parent)	\
 static struct clk_init_data clk_##__clk##_init = {	\
-	.name = STRINGIFY(__clk),			\
+	.name = __stringify(__clk),			\
 	.ops = &std_clk_ops,				\
 	.parent_names = __parent,		\
 	.num_parents = ARRAY_SIZE(std_clk_parents),	\
