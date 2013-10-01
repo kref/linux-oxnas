@@ -4,12 +4,17 @@
 #include <linux/of_platform.h>
 #include <linux/clocksource.h>
 #include <linux/clk-provider.h>
+#include <linux/clk.h>
+#include <linux/stmmac.h>
+#include <linux/slab.h>
+#include <linux/gfp.h>
 #include <asm/mach-types.h>
 #include <asm/mach/map.h>
 #include <asm/mach/arch.h>
 #include <asm/page.h>
 #include <mach/iomap.h>
 #include <mach/hardware.h>
+#include <mach/utils.h>
 
 extern struct smp_operations ox820_smp_ops;
 
@@ -40,6 +45,68 @@ void __init ox820_map_common_io(void)
 	iotable_init(ox820_io_desc, ARRAY_SIZE(ox820_io_desc));
 }
 
+struct plat_gmac_data {
+	struct plat_stmmacenet_data stmmac;
+	int reset_bit;
+	struct clk *clk;
+};
+
+int ox820_gmac_init(struct platform_device *pdev)
+{
+	int ret;
+	struct plat_gmac_data *pdata = pdev->dev.platform_data;
+
+	ret = of_property_read_u32(pdev->dev.of_node,
+	                           "plxtech,reset-bit", &pdata->reset_bit);
+	if (ret)
+		return ret;
+
+	pdata->clk = clk_get(&pdev->dev, "gmac");
+	if (IS_ERR(pdata->clk))
+		return PTR_ERR(pdata->clk);
+
+	block_reset(pdata->reset_bit, 1);
+	block_reset(pdata->reset_bit, 0);
+	clk_prepare_enable(pdata->clk);
+
+	return 0;
+}
+
+void ox820_gmac_exit(struct platform_device *pdev)
+{
+	struct plat_gmac_data *pdata = pdev->dev.platform_data;
+
+	clk_disable_unprepare(pdata->clk);
+	block_reset(pdata->reset_bit, 1);
+	clk_put(pdata->clk);
+}
+
+static int __init ox820_ether_init(void)
+{
+	struct device_node *node;
+	struct platform_device *pdev;
+	struct plat_gmac_data *pdata;
+
+	node = of_find_compatible_node(NULL, NULL, "plxtech,nas782x-gmac");
+	if (!node)
+		return -ENOENT;
+
+	pdev = of_find_device_by_node(node);
+	of_node_put(node);
+
+	if (!pdev)
+		return -EINVAL;
+
+	pdata= kzalloc(sizeof(struct plat_gmac_data), GFP_KERNEL);
+	if (!pdata)
+		return -ENOMEM;
+
+	pdata->stmmac.init = ox820_gmac_init;
+	pdata->stmmac.exit = ox820_gmac_exit;
+	pdev->dev.platform_data = pdata;
+
+	return 0;
+}
 
 static void __init ox820_dt_init(void)
 {
@@ -49,6 +116,13 @@ static void __init ox820_dt_init(void)
                                    NULL);
         if (ret) {
                 pr_err("of_platform_populate failed: %d\n", ret);
+                BUG();
+        }
+
+        ret = ox820_ether_init();
+
+        if (ret) {
+                pr_err("ox820_ether_init failed: %d\n", ret);
                 BUG();
         }
 }
