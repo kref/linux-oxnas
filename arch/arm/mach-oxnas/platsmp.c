@@ -17,35 +17,13 @@
 #include <asm/cacheflush.h>
 #include <asm/localtimer.h>
 #include <asm/smp_scu.h>
-#include <mach/hardware.h>
 #include <asm/tlbflush.h>
 #include <asm/cputype.h>
-#include <linux/irqchip/arm-gic.h>
-
-
-/*
- *  linux/arch/arm/mach-ox820/platsmp.c
- *
- *  Copyright (C) 2002 ARM Ltd.
- *  All Rights Reserved
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
-#include <linux/init.h>
-#include <linux/errno.h>
-#include <linux/smp.h>
-#include <linux/io.h>
-#include <linux/irqchip/arm-gic.h>
-
-#include <mach/hardware.h>
-#include <asm/smp_scu.h>
-#include <asm/cacheflush.h>
-#include <asm/smp_plat.h>
 #include <asm/delay.h>
+#include <linux/irqchip/arm-gic.h>
 #include <mach/iomap.h>
 #include <mach/smp.h>
+#include <mach/hardware.h>
 
 static DEFINE_SPINLOCK(boot_lock);
 
