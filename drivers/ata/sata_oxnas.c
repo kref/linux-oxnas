@@ -1678,16 +1678,11 @@ static int sata_oxnas_probe(struct platform_device *ofdev)
 	int irq = 0;
 	struct ata_host *host = NULL;
 	struct clk *clk = NULL;
-	u32 version;
 
 	const struct ata_port_info *ppi[] = { &sata_oxnas_port_info, NULL };
 
 	port_base = of_iomap(ofdev->dev.of_node, 0);
 	if (!port_base)
-		goto error_exit_with_cleanup;
-
-	version = ioread32(port_base + VERSION);
-	if (version != SATA_OXNAS_CORE_VERSION)
 		goto error_exit_with_cleanup;
 
 	sgdma_base = of_iomap(ofdev->dev.of_node, 1);
