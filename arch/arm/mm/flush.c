@@ -291,7 +291,11 @@ void flush_dcache_page(struct page *page)
 
 	mapping = page_mapping(page);
 
+#ifndef CONFIG_DMA_CACHE_FIQ_BROADCAST
 	if (!cache_ops_need_broadcast() &&
+#else
+	if (
+#endif
 	    mapping && !page_mapped(page))
 		clear_bit(PG_dcache_clean, &page->flags);
 	else {
