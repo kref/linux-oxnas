@@ -37,6 +37,18 @@ static struct map_desc ox820_io_desc[] __initdata = {
 		.length = OXNAS_SECCRTL_SIZE,
 		.type = MT_DEVICE,
 	},
+	{
+		.virtual = (unsigned long)OXNAS_RPSA_BASE_VA,
+		.pfn = __phys_to_pfn(OXNAS_RPSA_BASE),
+		.length = OXNAS_RPSA_SIZE,
+		.type = MT_DEVICE,
+	},
+	{
+		.virtual = (unsigned long)OXNAS_RPSC_BASE_VA,
+		.pfn = __phys_to_pfn(OXNAS_RPSC_BASE),
+		.length = OXNAS_RPSC_SIZE,
+		.type = MT_DEVICE,
+	},
 };
 
 void __init ox820_map_common_io(void)

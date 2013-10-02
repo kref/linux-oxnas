@@ -14,21 +14,204 @@
 #include <linux/smp.h>
 #include <linux/io.h>
 #include <linux/dma-mapping.h>
+#include <linux/cache.h>
 #include <asm/cacheflush.h>
 #include <asm/localtimer.h>
 #include <asm/smp_scu.h>
 #include <asm/tlbflush.h>
 #include <asm/cputype.h>
 #include <asm/delay.h>
+#include <asm/fiq.h>
+
 #include <linux/irqchip/arm-gic.h>
 #include <mach/iomap.h>
 #include <mach/smp.h>
 #include <mach/hardware.h>
+#include <mach/irqs.h>
+
+#ifdef CONFIG_DMA_CACHE_FIQ_BROADCAST
+
+#define FIQ_GENERATE		0x00000002
+#define OXNAS_MAP_AREA		0x01000000
+#define OXNAS_UNMAP_AREA	0x02000000
+#define OXNAS_FLUSH_RANGE	0x03000000
+
+struct fiq_req {
+	union {
+		struct {
+			const void *addr;
+			size_t size;
+		} map;
+		struct {
+			const void *addr;
+			size_t size;
+		} unmap;
+		struct {
+			const void *start;
+			const void *end;
+		} flush;
+	};
+	volatile uint flags;
+	void __iomem *reg;
+} ____cacheline_aligned;
+
+static struct fiq_handler fh = {
+	.name = "oxnas-fiq"
+};
+
+extern unsigned char ox820_fiq_start, ox820_fiq_end;
+extern void v6_dma_map_area(const void *, size_t, int);
+extern void v6_dma_unmap_area(const void *, size_t, int);
+extern void v6_dma_flush_range(const void *, const void *);
+extern void v6_flush_kern_dcache_area(void *, size_t);
+
+DEFINE_PER_CPU(struct fiq_req, fiq_data);
+
+static inline void __cpuinit ox820_set_fiq_regs(unsigned int cpu)
+{
+	struct pt_regs FIQ_regs;
+	struct fiq_req *fiq_req = &per_cpu(fiq_data, !cpu);
+
+	FIQ_regs.ARM_r8 = 0;
+	FIQ_regs.ARM_ip = (unsigned int)fiq_req;
+	FIQ_regs.ARM_sp = (int)(cpu ? RPSC_IRQ_SOFT : RPSA_IRQ_SOFT);
+	fiq_req->reg = cpu ? RPSC_IRQ_SOFT : RPSA_IRQ_SOFT;
+
+	set_fiq_regs(&FIQ_regs);
+}
+
+static void __init ox820_init_fiq(void)
+{
+	void *fiqhandler_start;
+	unsigned int fiqhandler_length;
+	int ret;
+
+	fiqhandler_start = &ox820_fiq_start;
+	fiqhandler_length = &ox820_fiq_end - &ox820_fiq_start;
+
+	ret = claim_fiq(&fh);
+
+	if (ret) {
+		return;
+	}
+
+	set_fiq_handler(fiqhandler_start, fiqhandler_length);
+
+	writel(IRQ_SOFT, RPSA_FIQ_IRQ_TO_FIQ);
+	writel(1, RPSA_FIQ_ENABLE);
+	writel(IRQ_SOFT, RPSC_FIQ_IRQ_TO_FIQ);
+	writel(1, RPSC_FIQ_ENABLE);
+}
+
+void fiq_dma_map_area(const void *addr, size_t size, int dir)
+{
+	unsigned long flags;
+	struct fiq_req *req;
+
+	raw_local_irq_save(flags);
+	/* currently, not possible to take cpu0 down, so only check cpu1 */
+	if(!cpu_online(1)) {
+		raw_local_irq_restore(flags);
+		v6_dma_map_area(addr, size, dir);
+		return;
+	}
+
+	req = this_cpu_ptr(&fiq_data);
+	req->map.addr = addr;
+	req->map.size = size;
+	req->flags = dir | OXNAS_MAP_AREA;
+	smp_mb();
+
+	writel_relaxed(FIQ_GENERATE, req->reg);
+
+	v6_dma_map_area(addr, size, dir);
+	while (req->flags) {
+		barrier();
+	}
+
+	raw_local_irq_restore(flags);
+}
+
+void fiq_dma_unmap_area(const void *addr, size_t size, int dir)
+{
+	unsigned long flags;
+	struct fiq_req *req;
+
+	raw_local_irq_save(flags);
+	/* currently, not possible to take cpu0 down, so only check cpu1 */
+	if(!cpu_online(1)) {
+		raw_local_irq_restore(flags);
+		v6_dma_unmap_area(addr, size, dir);
+		return;
+	}
+
+	req = this_cpu_ptr(&fiq_data);
+	req->unmap.addr = addr;
+	req->unmap.size = size;
+	req->flags = dir | OXNAS_UNMAP_AREA;
+	smp_mb();
+
+	writel_relaxed(FIQ_GENERATE, req->reg);
+
+	v6_dma_unmap_area(addr, size, dir);
+	while (req->flags) {
+		barrier();
+	}
+
+	raw_local_irq_restore(flags);
+}
+
+void fiq_dma_flush_range(const void *start, const void *end)
+{
+	unsigned long flags;
+	struct fiq_req *req;
+
+	raw_local_irq_save(flags);
+	/* currently, not possible to take cpu0 down, so only check cpu1 */
+	if(!cpu_online(1)) {
+		raw_local_irq_restore(flags);
+		v6_dma_flush_range(start, end);
+		return;
+	}
+
+	req = this_cpu_ptr(&fiq_data);
+
+	req->flush.start = start;
+	req->flush.end = end;
+	req->flags = OXNAS_FLUSH_RANGE;
+	smp_mb();
+
+	writel_relaxed(FIQ_GENERATE, req->reg);
+
+	v6_dma_flush_range(start, end);
+
+	while (req->flags) {
+		barrier();
+	}
+
+	raw_local_irq_restore(flags);
+}
+
+void fiq_flush_kern_dcache_area(void *addr, size_t size)
+{
+	fiq_dma_flush_range(addr, addr + size);
+}
+#else
+
+#define ox820_set_fiq_regs(cpu)	do {} while (0) /* nothing */
+#define ox820_init_fiq()	do {} while (0) /* nothing */
+
+#endif /* DMA_CACHE_FIQ_BROADCAST */
 
 static DEFINE_SPINLOCK(boot_lock);
 
 void __cpuinit ox820_secondary_init(unsigned int cpu)
 {
+	/*
+	 * Setup Secondary Core FIQ regs
+	 */
+	ox820_set_fiq_regs(1);
+
 	/*
 	 * let the primary processor know we're out of the
 	 * pen, then head off into the C entry point
@@ -127,6 +310,9 @@ static void __init ox820_smp_prepare_cpus(unsigned int max_cpus)
 	 */
 	writel(virt_to_phys(ox820_secondary_startup),
 					HOLDINGPEN_LOCATION);
+	ox820_init_fiq();
+
+	ox820_set_fiq_regs(0);
 }
 
 struct smp_operations ox820_smp_ops __initdata = {
