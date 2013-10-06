@@ -23,6 +23,8 @@
 		/* alias to determine bank index */
 		gpio0 = &GPIOA;
 		gpio1 = &GPIOB;
+
+		ethernet0 = &gmac;
 	};
 
 	cpus {
