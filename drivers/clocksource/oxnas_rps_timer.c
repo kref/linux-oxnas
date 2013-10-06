@@ -25,6 +25,8 @@
 #include <linux/clk.h>
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
+#include <linux/sched_clock.h>
+#include <mach/hardware.h>
 
 enum {
 	TIMER_LOAD = 0,
@@ -155,6 +157,11 @@ static void __init rps_clockevent_init(void __iomem *base, ulong ref_rate, int i
 	setup_irq(irq, &rps_clock_event_irq);
 }
 
+static u32 notrace rps_read_sched_clock(void)
+{
+	return ~readl_relaxed(RPSA_TIMER2_VAL);
+}
+
 static void __init rps_clocksource_init(void __iomem *base, ulong ref_rate)
 {
 	int ret;
@@ -170,6 +177,8 @@ static void __init rps_clocksource_init(void __iomem *base, ulong ref_rate)
 					clocksource_mmio_readl_down);
 	if (ret)
 		panic("can't register clocksource\n");
+
+	 setup_sched_clock(rps_read_sched_clock, TIMER_BITS, clock_rate);
 }
 
 static void __init rps_timer_init(struct device_node *np)
