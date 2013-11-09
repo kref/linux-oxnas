@@ -263,8 +263,6 @@
 		compatible = "plxtech,nas782x-rps-timer";
 		reg = <0x44400200 0x40>;
 		clocks = <&sysclk>;
-		interrupts = <4>;
-		interrupt-parent = <&rps>;
 	};
 
 	uart0: uart@44200000 {

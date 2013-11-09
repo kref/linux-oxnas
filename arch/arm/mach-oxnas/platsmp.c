@@ -16,7 +16,6 @@
 #include <linux/dma-mapping.h>
 #include <linux/cache.h>
 #include <asm/cacheflush.h>
-#include <asm/localtimer.h>
 #include <asm/smp_scu.h>
 #include <asm/tlbflush.h>
 #include <asm/cputype.h>

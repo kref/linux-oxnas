@@ -9,7 +9,7 @@ config MACH_OX820
 	select GENERIC_CLOCKEVENTS
 	select CPU_V6K
 	select HAVE_ARM_SCU if SMP
-	select HAVE_ARM_TWD if LOCAL_TIMERS
+	select HAVE_ARM_TWD if SMP
 	select HAVE_SMP
 	select PLXTECH_RPS
 	select CLKSRC_OF
