@@ -680,23 +680,35 @@ static int oxnas_pinconf_get(struct pinctrl_dev *pctldev,
 }
 
 static int oxnas_pinconf_set(struct pinctrl_dev *pctldev,
-			     unsigned pin_id, unsigned long config)
+                             unsigned pin_id, unsigned long *configs,
+                             unsigned num_configs)
+
 {
 	struct oxnas_pinctrl *info = pinctrl_dev_get_drvdata(pctldev);
 	unsigned mask;
 	void __iomem *pio;
+	int i;
+	unsigned long config;
 
-	dev_dbg(info->dev, "%s:%d, pin_id=%d, config=0x%lx", __func__, __LINE__, pin_id, config);
 	pio = pin_to_gpioctrl(info, pin_to_bank(pin_id));
 	mask = pin_to_mask(pin_id % MAX_NB_GPIO_PER_BANK);
 
-	if ((config & PULL_UP) && (config & PULL_DOWN))
-		return -EINVAL;
+	for (i = 0; i < num_configs; i++) {
+		config = configs[i];
 
-	oxnas_mux_set_pullup(pio, mask, config & PULL_UP);
-	oxnas_mux_set_pulldown(pio, mask, config & PULL_DOWN);
-	oxnas_mux_set_debounce(pio, mask, config & DEBOUNCE,
-	                       config & DEBOUNCE_MASK);
+		dev_dbg(info->dev,
+		        "%s:%d, pin_id=%d, config=0x%lx",
+		        __func__, __LINE__, pin_id, config);
+
+		if ((config & PULL_UP) && (config & PULL_DOWN))
+			return -EINVAL;
+
+		oxnas_mux_set_pullup(pio, mask, config & PULL_UP);
+		oxnas_mux_set_pulldown(pio, mask, config & PULL_DOWN);
+		oxnas_mux_set_debounce(pio, mask, config & DEBOUNCE,
+				       config & DEBOUNCE_MASK);
+
+	} /* for each config */
 
 	return 0;
 }
