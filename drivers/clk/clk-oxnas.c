@@ -157,7 +157,7 @@ static struct clk_init_data clk_##__clk##_init = {	\
 	.name = __stringify(__clk),			\
 	.ops = &std_clk_ops,				\
 	.parent_names = __parent,		\
-	.num_parents = ARRAY_SIZE(std_clk_parents),	\
+	.num_parents = ARRAY_SIZE(__parent),	\
 };							\
 							\
 static struct clk_std clk_##__clk = {			\
