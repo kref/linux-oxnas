@@ -250,6 +250,8 @@ static const struct of_device_id oxnas_ehci_dt_ids[] = {
 	{ /* sentinel */ }
 };
 
+MODULE_DEVICE_TABLE(of, oxnas_ehci_dt_ids);
+
 static struct platform_driver ehci_oxnas_driver = {
 	.probe		= ehci_oxnas_drv_probe,
 	.remove		= ehci_oxnas_drv_remove,
