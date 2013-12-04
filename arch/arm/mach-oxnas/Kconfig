@@ -21,9 +21,3 @@ config MACH_OX820
 	  Include support for the ox820 platform.
 
 endchoice
-
-config TESTING_POGO
-	bool "Support Pogoplug v3"
-	depends on MACH_OX820
-	help
-	  Enable support for pogoplug v3
