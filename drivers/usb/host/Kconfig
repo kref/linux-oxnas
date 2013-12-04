@@ -274,7 +274,7 @@ config USB_OCTEON_EHCI
 	  supported.
 
 config USB_EHCI_OXNAS
-	bool "OXNAS EHCI Module"
+	tristate "OXNAS EHCI Module"
 	depends on USB_EHCI_HCD && ARCH_OXNAS
 	select USB_EHCI_ROOT_HUB_TT
 	---help---
