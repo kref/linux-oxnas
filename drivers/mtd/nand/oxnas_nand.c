@@ -89,6 +89,12 @@ static int __init oxnas_register_nand(void)
 
 subsys_initcall(oxnas_register_nand);
 
+static const struct of_device_id oxnas_nand_ids[] = {
+	{ .compatible = "plxtech,nand-nas782x"},
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, oxnas_nand_ids);
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Ma Haijun");
 MODULE_DESCRIPTION("NAND glue for Oxnas platforms");
