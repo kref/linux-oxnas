@@ -4,6 +4,7 @@
  *  by the Free Software Foundation.
  */
 
+#include <linux/module.h>
 #include <linux/mtd/nand.h>
 #include <linux/of_gpio.h>
 #include <linux/of_platform.h>
@@ -87,3 +88,8 @@ static int __init oxnas_register_nand(void)
 }
 
 subsys_initcall(oxnas_register_nand);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Ma Haijun");
+MODULE_DESCRIPTION("NAND glue for Oxnas platforms");
+MODULE_ALIAS("platform:oxnas_nand");
