@@ -1,22 +1,16 @@
 /*
- * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2013 Ma Haijun <mahaijuns@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
 
-/dts-v1/;
-
 /include/ "skeleton.dtsi"
 
 / {
 	compatible = "plxtech,nas7820", "plxtech,nas782x";
 	interrupt-parent = <&gic>;
-
-	chosen {
-		bootargs = "console=ttyS0,115200n8 root=/dev/sda2 rootfstype=ext4 ubi.mtd=data,512";
-	};
 
 	aliases {
 		serial0 = &uart0;
@@ -206,6 +200,7 @@
 		plxtech,pcie-reset-bit = <7>;
 		plxtech,pcie-ctrl-offset = <0x120>;
 		plxtech,pcie-outbound-offset = <0x138>;
+		status = "disabled";
 	};
 
 	pcie-controller@47E00000 {
@@ -277,6 +272,7 @@
 		no-loopback-test;
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_uart0>;
+		status = "disabled";
 	};
 
 	sata@45900000 {
@@ -287,6 +283,7 @@
 			<0x44900000 0x0C>, <0x50000000 0x1000>;
 		interrupts = <0 18 0x304>;
 		clocks = <&stdclk 4>;
+		status = "disabled";
 	};
 
 	nand@41000000 {
@@ -299,17 +296,7 @@
 
 		#address-cells = <1>;
 		#size-cells = <1>;
-
-		partition@0 {
-			label = "boot";
-			reg = <0x00000000 0x00e00000>;
-			/*read-only;*/
-		};
-
-		partition@e00000 {
-			label = "data";
-			reg = <0x00e00000 0x07200000>;
-		};
+		status = "disabled";
 	};
 
 	gmac: ethernet@40400000 {
@@ -324,6 +311,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_gmac0>;
 		plxtech,reset-bit = <6>;
+		status = "disabled";
 	};
 
 	ehci@40200100 {
@@ -337,5 +325,6 @@
 		 * in that case, usb depends on sata initialization */
 		/* FIXME: how to make this dependency explicit ? */
 		plxtch,ehci_use_pllb;
+		status = "disabled";
 	};
 };
