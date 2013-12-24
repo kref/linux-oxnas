@@ -50,4 +50,37 @@
 	ehci@40200100 {
 		status = "okay";
 	};
+
+	pinctrl {
+		leds {
+			pinctrl_leds: leds-0 {
+				plxtech,pins =
+					<0 2 0 0	/* MF_A2 */
+					 1 16 0 0	/* MF_B16 */
+					 1 17 0 0>;	/* MF_B17 */
+			};
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_leds>;
+
+		blue {
+			label = "pogoplug:blue:usr";
+			gpios = <&GPIOA 2 0>;
+
+		};
+
+		orange {
+			label = "pogoplug:orange:usr";
+			gpios = <&GPIOB 16 1>;
+		};
+
+		green {
+			label = "pogoplug:green:usr";
+			gpios = <&GPIOB 17 1>;
+		};
+	};
 };
