@@ -134,8 +134,7 @@ static void __init ox820_dt_init(void)
         ret = ox820_ether_init();
 
         if (ret) {
-                pr_err("ox820_ether_init failed: %d\n", ret);
-                BUG();
+                pr_info("ox820_ether_init failed: %d\n", ret);
         }
 }
 
