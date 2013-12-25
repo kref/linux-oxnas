@@ -1748,8 +1748,6 @@ static int sata_oxnas_probe(struct platform_device *ofdev)
 	ata_host_activate(host, irq, sata_oxnas_interrupt, SATA_OXNAS_IRQ_FLAG,
 			  &sata_oxnas_sht);
 
-	dev_set_drvdata(&ofdev->dev, host);
-
 	return 0;
 
 error_exit_with_cleanup:
