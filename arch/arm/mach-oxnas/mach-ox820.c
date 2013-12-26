@@ -66,6 +66,7 @@ struct plat_gmac_data {
 int ox820_gmac_init(struct platform_device *pdev)
 {
 	int ret;
+	unsigned value;
 	struct plat_gmac_data *pdata = pdev->dev.platform_data;
 
 	ret = device_reset(&pdev->dev);
@@ -76,6 +77,31 @@ int ox820_gmac_init(struct platform_device *pdev)
 	if (IS_ERR(pdata->clk))
 		return PTR_ERR(pdata->clk);
 	clk_prepare_enable(pdata->clk);
+
+	value = readl(SYS_CTRL_GMAC_CTRL);
+
+	/* Enable GMII_GTXCLK to follow GMII_REFCLK - required for gigabit PHY */
+	value |= BIT(SYS_CTRL_GMAC_CKEN_GTX);
+	/* Use simple mux for 25/125 Mhz clock switching */
+	value |= BIT(SYS_CTRL_GMAC_SIMPLE_MUX);
+	/* set auto switch tx clock source */
+	value |= BIT(SYS_CTRL_GMAC_AUTO_TX_SOURCE);
+	/* enable tx & rx vardelay */
+	value |= BIT(SYS_CTRL_GMAC_CKEN_TX_OUT);
+	value |= BIT(SYS_CTRL_GMAC_CKEN_TXN_OUT);
+	value |= BIT(SYS_CTRL_GMAC_CKEN_TX_IN);
+	value |= BIT(SYS_CTRL_GMAC_CKEN_RX_OUT);
+	value |= BIT(SYS_CTRL_GMAC_CKEN_RXN_OUT);
+	value |= BIT(SYS_CTRL_GMAC_CKEN_RX_IN);
+	writel(value, SYS_CTRL_GMAC_CTRL);
+
+	/* set tx & rx vardelay */
+	value = 0;
+	value |= SYS_CTRL_GMAC_TX_VARDELAY(4);
+	value |= SYS_CTRL_GMAC_TXN_VARDELAY(2);
+	value |= SYS_CTRL_GMAC_RX_VARDELAY(10);
+	value |= SYS_CTRL_GMAC_RXN_VARDELAY(8);
+	writel(value, SYS_CTRL_GMAC_DELAY_CTRL);
 
 	return 0;
 }
