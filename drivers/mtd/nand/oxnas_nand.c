@@ -9,6 +9,7 @@
 #include <linux/of_gpio.h>
 #include <linux/of_platform.h>
 #include <linux/clk.h>
+#include <linux/reset.h>
 #include <mach/utils.h>
 
 /* nand commands */
@@ -47,7 +48,7 @@ static int oxnas_nand_probe(struct platform_device *pdev)
 		return PTR_ERR(clk);
 
 	clk_prepare_enable(clk);
-	block_reset(SYS_CTRL_RST_STATIC, 0);
+	device_reset(&pdev->dev);
 
 	return 0;
 }

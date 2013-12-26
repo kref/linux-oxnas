@@ -17,6 +17,7 @@ config MACH_OX820
 	select USB_ARCH_HAS_EHCI
 	select PINCTRL_OXNAS
 	select PINCTRL
+	select RESET_CONTROLLER_OXNAS
 	help
 	  Include support for the ox820 platform.
 

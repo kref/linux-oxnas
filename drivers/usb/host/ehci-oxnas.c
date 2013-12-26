@@ -18,6 +18,7 @@
 #include <linux/usb/hcd.h>
 #include <linux/dma-mapping.h>
 #include <linux/clk.h>
+#include <linux/reset.h>
 #include <mach/hardware.h>
 #include <mach/utils.h>
 
@@ -29,6 +30,9 @@ struct oxnas_hcd {
 	struct clk *phyref;
 	int use_pllb;
 	int use_phya;
+	struct reset_control *rst_host;
+	struct reset_control *rst_phya;
+	struct reset_control *rst_phyb;
 };
 
 #define DRIVER_DESC "Oxnas On-Chip EHCI Host Controller"
@@ -53,14 +57,9 @@ static void start_oxnas_usb_ehci(struct oxnas_hcd *oxnas)
 	}
 
 	/* Ensure the USB block is properly reset */
-	block_reset(SYS_CTRL_RST_USBHS, 1);
-	block_reset(SYS_CTRL_RST_USBHS, 0);
-
-	block_reset(SYS_CTRL_RST_USBHSPHYA, 1);
-	block_reset(SYS_CTRL_RST_USBHSPHYA, 0);
-
-	block_reset(SYS_CTRL_RST_USBHSPHYB, 1);
-	block_reset(SYS_CTRL_RST_USBHSPHYB, 0);
+	reset_control_reset(oxnas->rst_host);
+	reset_control_reset(oxnas->rst_phya);
+	reset_control_reset(oxnas->rst_phyb);
 
 	/* Force the high speed clock to be generated all the time, via serial
 	 programming of the USB HS PHY */
@@ -96,7 +95,10 @@ static void start_oxnas_usb_ehci(struct oxnas_hcd *oxnas)
 
 static void stop_oxnas_usb_ehci(struct oxnas_hcd *oxnas)
 {
-	block_reset(SYS_CTRL_RST_USBHS, 1);
+	reset_control_assert(oxnas->rst_host);
+	reset_control_assert(oxnas->rst_phya);
+	reset_control_assert(oxnas->rst_phyb);
+
 	if (oxnas->use_pllb) {
 		clk_disable_unprepare(oxnas->phyref);
 		clk_disable_unprepare(oxnas->refsrc);
@@ -136,6 +138,7 @@ static int ehci_oxnas_drv_probe(struct platform_device *ofdev)
 	struct resource res;
 	struct oxnas_hcd *oxnas;
 	int irq, err;
+	struct reset_control *rstc;
 
 	if (usb_disabled())
 		return -ENODEV;
@@ -192,6 +195,27 @@ static int ehci_oxnas_drv_probe(struct platform_device *ofdev)
 		oxnas->phyref = NULL;
 	}
 
+	rstc = devm_reset_control_get(&ofdev->dev, "host");
+	if (IS_ERR(rstc)) {
+		err = PTR_ERR(rstc);
+		goto err_rst;
+	}
+	oxnas->rst_host = rstc;
+
+	rstc = devm_reset_control_get(&ofdev->dev, "phya");
+	if (IS_ERR(rstc)) {
+		err = PTR_ERR(rstc);
+		goto err_rst;
+	}
+	oxnas->rst_phya = rstc;
+
+	rstc = devm_reset_control_get(&ofdev->dev, "phyb");
+	if (IS_ERR(rstc)) {
+		err = PTR_ERR(rstc);
+		goto err_rst;
+	}
+	oxnas->rst_phyb = rstc;
+
 	irq = irq_of_parse_and_map(np, 0);
 	if (!irq) {
 		dev_err(&ofdev->dev, "irq_of_parse_and_map failed\n");
@@ -214,6 +238,7 @@ static int ehci_oxnas_drv_probe(struct platform_device *ofdev)
 err_hcd:
 	stop_oxnas_usb_ehci(oxnas);
 err_irq:
+err_rst:
 	if (oxnas->phyref) clk_put(oxnas->phyref);
 err_phyref:
 	if (oxnas->refsrc) clk_put(oxnas->refsrc);

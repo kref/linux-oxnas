@@ -21,6 +21,7 @@
 #include <linux/gpio.h>
 #include <linux/delay.h>
 #include <linux/clk.h>
+#include <linux/reset.h>
 #include <mach/iomap.h>
 #include <mach/hardware.h>
 #include <mach/utils.h>
@@ -124,7 +125,6 @@ struct oxnas_pcie {
 	unsigned hcsl_en;		/* hcsl pci enable bit */
 	struct clk *clk;
 	struct clk *busclk;		/* for pcie bus, actually the PLLB */
-	unsigned core_reset;		/* reset bit in sys ctl */
 	void *private_data[1];
 	spinlock_t lock;
 };
@@ -377,14 +377,27 @@ static void __init oxnas_pcie_enable(struct device* dev, struct oxnas_pcie *pcie
 	pci_common_init_dev(dev, &hw);
 }
 
-void oxnas_pcie_init_shared_hw(void __iomem *phybase)
+void oxnas_pcie_init_shared_hw(struct platform_device *pdev, void __iomem *phybase)
 {
+	struct reset_control *rstc;
+	int ret;
+
 	/* generate clocks from HCSL buffers, shared parts */
 	writel(HCSL_BIAS_ON|HCSL_PCIE_EN, SYS_CTRL_HCSL_CTRL);
 
 	/* Ensure PCIe PHY is properly reset */
-	block_reset(SYS_CTRL_RST_PCIEPHY, 1);
-	block_reset(SYS_CTRL_RST_PCIEPHY, 0);
+	rstc = reset_control_get(&pdev->dev, "phy");
+	if (IS_ERR(rstc)) {
+		ret = PTR_ERR(rstc);
+	} else {
+		ret = reset_control_reset(rstc);
+		reset_control_put(rstc);
+	}
+
+	if (ret) {
+		dev_err(&pdev->dev, "phy reset failed %d\n", ret);
+		return;
+	}
 
 	/* Enable PCIe Pre-Emphasis: What these value means? */
 
@@ -408,7 +421,7 @@ static int oxnas_pcie_shared_init(struct platform_device *pdev)
 			--pcie_shared.refcount;
 			return -ENOMEM;
 		}
-		oxnas_pcie_init_shared_hw(phy);
+		oxnas_pcie_init_shared_hw(pdev, phy);
 		iounmap(phy);
 		return 0;
 	} else {
@@ -513,9 +526,6 @@ static int __init oxnas_pcie_init_res(struct platform_device *pdev,
 	if (of_property_read_u32(np, "plxtech,pcie-hcsl-bit", &pcie->hcsl_en))
 		return -EINVAL;
 
-	if (of_property_read_u32(np, "plxtech,pcie-reset-bit", &pcie->core_reset))
-		return -EINVAL;
-
 	pcie->clk = of_clk_get_by_name(np, "pcie");
 	if (IS_ERR(pcie->clk)) {
 		return PTR_ERR(pcie->clk);
@@ -534,6 +544,7 @@ static void oxnas_pcie_init_hw(struct platform_device *pdev,
                                      struct oxnas_pcie *pcie)
 {
 	u32 version_id;
+	int ret;
 
 	clk_prepare_enable(pcie->busclk);
 
@@ -551,8 +562,11 @@ static void oxnas_pcie_init_hw(struct platform_device *pdev,
 	oxnas_register_set_mask(SYS_CTRL_HCSL_CTRL, BIT(pcie->hcsl_en));
 
 	/* core */
-	block_reset(pcie->core_reset, 1);
-	block_reset(pcie->core_reset, 0);
+	ret = device_reset(&pdev->dev);
+	if (ret) {
+		dev_err(&pdev->dev, "core reset failed %d\n", ret);
+		return;
+	}
 
 	/* Start PCIe core clocks */
 	clk_prepare_enable(pcie->clk);
