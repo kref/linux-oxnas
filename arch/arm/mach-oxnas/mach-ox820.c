@@ -8,6 +8,7 @@
 #include <linux/stmmac.h>
 #include <linux/slab.h>
 #include <linux/gfp.h>
+#include <linux/reset.h>
 #include <asm/mach-types.h>
 #include <asm/mach/map.h>
 #include <asm/mach/arch.h>
@@ -59,7 +60,6 @@ void __init ox820_map_common_io(void)
 
 struct plat_gmac_data {
 	struct plat_stmmacenet_data stmmac;
-	int reset_bit;
 	struct clk *clk;
 };
 
@@ -68,17 +68,13 @@ int ox820_gmac_init(struct platform_device *pdev)
 	int ret;
 	struct plat_gmac_data *pdata = pdev->dev.platform_data;
 
-	ret = of_property_read_u32(pdev->dev.of_node,
-	                           "plxtech,reset-bit", &pdata->reset_bit);
+	ret = device_reset(&pdev->dev);
 	if (ret)
 		return ret;
 
 	pdata->clk = clk_get(&pdev->dev, "gmac");
 	if (IS_ERR(pdata->clk))
 		return PTR_ERR(pdata->clk);
-
-	block_reset(pdata->reset_bit, 1);
-	block_reset(pdata->reset_bit, 0);
 	clk_prepare_enable(pdata->clk);
 
 	return 0;
@@ -87,10 +83,16 @@ int ox820_gmac_init(struct platform_device *pdev)
 void ox820_gmac_exit(struct platform_device *pdev)
 {
 	struct plat_gmac_data *pdata = pdev->dev.platform_data;
+	struct reset_control *rstc;
 
 	clk_disable_unprepare(pdata->clk);
-	block_reset(pdata->reset_bit, 1);
 	clk_put(pdata->clk);
+
+	rstc = reset_control_get(&pdev->dev, NULL);
+	if (!IS_ERR(rstc)) {
+		reset_control_assert(rstc);
+		reset_control_put(rstc);
+	}
 }
 
 static int __init ox820_ether_init(void)

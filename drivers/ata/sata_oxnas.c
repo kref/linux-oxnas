@@ -7,6 +7,7 @@
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/clk.h>
+#include <linux/reset.h>
 
 #include <mach/utils.h>
 
@@ -294,6 +295,9 @@ struct sata_oxnas_host_priv {
 	int irq;
 	u32 port_in_eh;
 	struct clk *clk;
+	struct reset_control *rst_sata;
+	struct reset_control *rst_link;
+	struct reset_control *rst_phy;
 };
 
 
@@ -565,18 +569,18 @@ static void sata_oxnas_reset_core(struct ata_host *ah)
 	DPRINTK("ENTER\n");
 	clk_prepare_enable(host_priv->clk);
 
-	block_reset(SYS_CTRL_RST_SATA, 1);
-	block_reset(SYS_CTRL_RST_SATA_LINK, 1);
-	block_reset(SYS_CTRL_RST_SATA_PHY, 1);
+	reset_control_assert(host_priv->rst_sata);
+	reset_control_assert(host_priv->rst_link);
+	reset_control_assert(host_priv->rst_phy);
 
 	udelay(50);
 
 	// un-reset the PHY, then Link and Controller
-	block_reset(SYS_CTRL_RST_SATA_PHY, 0);
+	reset_control_deassert(host_priv->rst_phy);
 	udelay(50);
 
-	block_reset(SYS_CTRL_RST_SATA, 0);
-	block_reset(SYS_CTRL_RST_SATA_LINK, 0);
+	reset_control_deassert(host_priv->rst_sata);
+	reset_control_deassert(host_priv->rst_link);
 	udelay(50);
 
 	workaround5458(ah);
@@ -1672,6 +1676,7 @@ static int sata_oxnas_probe(struct platform_device *ofdev)
 	void __iomem *sgdma_base = NULL;
 	void __iomem *core_base = NULL;
 	void __iomem *phy_base = NULL;
+	struct reset_control *rstc;
 
 	struct resource res = {};
 	struct sata_oxnas_host_priv *host_priv = NULL;
@@ -1725,6 +1730,27 @@ static int sata_oxnas_probe(struct platform_device *ofdev)
 		goto error_exit_with_cleanup;
 	}
 	host_priv->clk = clk;
+
+	rstc = devm_reset_control_get(&ofdev->dev, "sata");
+	if (IS_ERR(rstc)) {
+		retval = PTR_ERR(rstc);
+		goto error_exit_with_cleanup;
+	}
+	host_priv->rst_sata = rstc;
+
+	rstc = devm_reset_control_get(&ofdev->dev, "link");
+	if (IS_ERR(rstc)) {
+		retval = PTR_ERR(rstc);
+		goto error_exit_with_cleanup;
+	}
+	host_priv->rst_link = rstc;
+
+	rstc = devm_reset_control_get(&ofdev->dev, "phy");
+	if (IS_ERR(rstc)) {
+		retval = PTR_ERR(rstc);
+		goto error_exit_with_cleanup;
+	}
+	host_priv->rst_phy = rstc;
 
 	/* allocate host structure */
 	host = ata_host_alloc_pinfo(&ofdev->dev, ppi, SATA_OXNAS_MAX_PORTS);
@@ -1782,9 +1808,9 @@ static int sata_oxnas_remove(struct platform_device *ofdev)
 	iounmap(host_priv->core_base);
 
 	// reset Controller, Link and PHY
-	block_reset(SYS_CTRL_RST_SATA, 1);
-	block_reset(SYS_CTRL_RST_SATA_LINK, 1);
-	block_reset(SYS_CTRL_RST_SATA_PHY, 1);
+	reset_control_assert(host_priv->rst_sata);
+	reset_control_assert(host_priv->rst_link);
+	reset_control_assert(host_priv->rst_phy);
 
 	// Disable the clock to the SATA block
 	clk_disable_unprepare(host_priv->clk);

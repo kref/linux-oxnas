@@ -23,6 +23,7 @@
 #include <linux/of.h>
 #include <linux/delay.h>
 #include <linux/stringify.h>
+#include <linux/reset.h>
 #include <asm/io.h>
 #include <mach/hardware.h>
 #include <mach/utils.h>
@@ -67,18 +68,27 @@ static struct clk_hw plla_hw = {
 	.init = &clk_plla_init,
 };
 
+static struct device_node *node_pllb;
+
 int pllb_clk_enable(struct clk_hw *hw)
 {
+	struct reset_control *rstc;
+
+	rstc = of_reset_control_get(node_pllb, NULL);
+	if (IS_ERR(rstc))
+		return PTR_ERR(rstc);
+
 	/* put PLL into bypass */
 	oxnas_register_set_mask(SEC_CTRL_PLLB_CTRL0, BIT(PLLB_BYPASS));
 	wmb();
 	udelay(10);
-	block_reset(SYS_CTRL_RST_PLLB, 1);
+	reset_control_assert(rstc);
 	udelay(10);
 	// set PLL B control information
 	writel((1 << PLLB_ENSAT) | (1 << PLLB_OUTDIV) | (2 << PLLB_REFDIV),
 				SEC_CTRL_PLLB_CTRL0);
-	block_reset(SYS_CTRL_RST_PLLB, 0);
+	reset_control_deassert(rstc);
+	reset_control_put(rstc);
 	udelay(100);
 	oxnas_register_clear_mask(SEC_CTRL_PLLB_CTRL0, BIT(PLLB_BYPASS));
 
@@ -87,11 +97,16 @@ int pllb_clk_enable(struct clk_hw *hw)
 
 void pllb_clk_disable(struct clk_hw *hw)
 {
+	struct reset_control *rstc;
+
 	/* put PLL into bypass */
 	oxnas_register_set_mask(SEC_CTRL_PLLB_CTRL0, BIT(PLLB_BYPASS));
 	wmb();
 	udelay(10);
-	block_reset(SYS_CTRL_RST_PLLB, 1);
+
+	rstc = of_reset_control_get(node_pllb, NULL);
+	if (!IS_ERR(rstc))
+		reset_control_assert(rstc);
 }
 
 static struct clk_ops pllb_ops = {
@@ -234,6 +249,8 @@ CLK_OF_DECLARE(oxnas_plla, "plxtech,nas782x-plla", oxnas_init_plla);
 void __init oxnas_init_pllb(struct device_node *np)
 {
 	struct clk *clk;
+
+	node_pllb = np;
 
 	clk = clk_register(NULL, &pllb_hw);
 	BUG_ON(IS_ERR(clk));

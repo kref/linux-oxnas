@@ -28,14 +28,4 @@ static inline void oxnas_register_value_mask(void __iomem *p,
 	writel_relaxed(val, p);
 }
 
-static inline void block_reset(int block, int reset)
-{
-	void __iomem *reg;
-	if (reset)
-		reg = SYS_CTRL_RST_SET_CTRL;
-	else
-		reg = SYS_CTRL_RST_CLR_CTRL;
-	writel(BIT(block), reg);
-}
-
 #endif /* _NAS782X_UTILS_H */

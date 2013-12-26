@@ -38,6 +38,12 @@
 		      <0x47000100 0x0100>;
 	};
 
+	rst: reset-controller@44E00034 {
+		compatible = "plxtech,nas782x-reset";
+		#reset-cells = <1>;
+		reg = <0x44E00034 0x8>; /* currently not used */
+	};
+
 	rps: rps@44400000 {
 		compatible = "plxtech,nas782x-rps";
 		interrupt-controller;
@@ -73,6 +79,7 @@
 		#clock-cells = <0>;
 		clocks = <&osc>;
 		reg = <0x44f001f0 0x10>;
+		resets = <&rst 31>;
 	};
 
 	stdclk: stdclk {
@@ -195,9 +202,10 @@
 		gpios = <&GPIOB 12 0>;
 		clocks = <&stdclk 8>, <&pllb>;
 		clock-names = "pcie", "busclk";
+		resets = <&rst 7>, <&rst 14>;
+		reset-names = "pcie", "phy";
 
 		plxtech,pcie-hcsl-bit = <2>;
-		plxtech,pcie-reset-bit = <7>;
 		plxtech,pcie-ctrl-offset = <0x120>;
 		plxtech,pcie-outbound-offset = <0x138>;
 		status = "disabled";
@@ -232,9 +240,10 @@
 		/* gpios = <&GPIOB 12 0>; */
 		clocks = <&stdclk 11>, <&pllb>;
 		clock-names = "pcie", "busclk";
+		resets = <&rst 23>, <&rst 14>;
+		reset-names = "pcie", "phy";
 
 		plxtech,pcie-hcsl-bit = <3>;
-		plxtech,pcie-reset-bit = <23>;
 		plxtech,pcie-ctrl-offset = <0x124>;
 		plxtech,pcie-outbound-offset = <0x174>;
 		status = "disabled";
@@ -283,6 +292,8 @@
 			<0x44900000 0x0C>, <0x50000000 0x1000>;
 		interrupts = <0 18 0x304>;
 		clocks = <&stdclk 4>;
+		resets = <&rst 11>, <&rst 12>, <&rst 13>;
+		reset-names = "sata", "link", "phy";
 		status = "disabled";
 	};
 
@@ -293,7 +304,7 @@
 		clocks = <&stdclk 9>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_nand0>;
-
+		resets = <&rst 15>;
 		#address-cells = <1>;
 		#size-cells = <1>;
 		status = "disabled";
@@ -310,7 +321,7 @@
 		clock-names = "gmac", "stmmaceth";
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_gmac0>;
-		plxtech,reset-bit = <6>;
+		resets = <&rst 6>;
 		status = "disabled";
 	};
 
@@ -320,7 +331,8 @@
 		interrupts = <0 7 0x304>;
 		clocks = <&stdclk 6>, <&pllb>, <&stdclk 12>;
 		clock-names = "usb", "refsrc", "phyref";
-
+		resets = <&rst 4>, <&rst 5>, <&rst 26>;
+		reset-names = "host", "phya", "phyb";
 		/* Otherwise ref300 is used, which is derived from sata phy
 		 * in that case, usb depends on sata initialization */
 		/* FIXME: how to make this dependency explicit ? */
