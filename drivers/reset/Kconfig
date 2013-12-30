@@ -13,8 +13,5 @@ menuconfig RESET_CONTROLLER
 	  If unsure, say no.
 
 config RESET_CONTROLLER_OXNAS
-	bool "Reset Controller Support for OXNAS"
-	default y if ARCH_OXNAS
-	depends on RESET_CONTROLLER
-	help
-	  OXNAS Reset Controller support.
+	bool
+	select RESET_CONTROLLER
