@@ -72,6 +72,59 @@ config SATA_FSL
 
 	  If unsure, say N.
 
+config SATA_OX820
+        bool "Oxford Semiconductor OX820 SATA support"
+        depends on ARCH_OX820
+        default n
+        help
+          This option enables support for the OX820/OX825 SATA controller
+
+config SATA_OX820_DIRECT
+	bool "Direct support in 820 SATA driver"
+	depends on SATA_OX820 && OXNAS_FAST_READS_AND_WRITES
+	default n
+	select SATA_OX820_DIRECT_SINGLE if SATA_OXNAS_SINGLE_SATA
+	select SATA_OX820_DIRECT_HWRAID if !SATA_OXNAS_SINGLE_SATA
+	help
+		Direct interface for 820 SATA driver
+
+config SATA_OXNAS_SINGLE_SATA
+        bool "Force OXNAS family devices to only use one SATA port"
+        depends on SATA_OX820
+        default n
+        help
+          Prevents the SATA driver from registering its second sata port, this
+          reduces startup time on systems where only one port is physically
+		  present on the board/chip periphery.
+
+config SATA_OX820_DIRECT_SINGLE
+        bool
+        default n
+
+config SATA_OX820_DIRECT_HWRAID
+        bool
+        default n
+	  
+config SATA_OXNAS_DISK_LIGHT
+        bool "Whether OXNAS family device should use a SATA disk activity light"
+        depends on SATA_OX820
+        default n
+
+config SATA_OXNAS_DISK_LIGHT_GPIO_LINE
+        int  "GPIO line of the disk light"
+        depends on SATA_OXNAS_DISK_LIGHT
+        default 29
+        help
+          Selects the GPIO line of the disk activity light.
+
+config ATA_SYNC_DISK_PROBE
+        bool "synchronous disk detection"
+        depends on ARCH_OX820
+        help
+          This forces synchronous disk detection and partition scanning for 
+          systems that have difficulty with deadlocks during disk startup.
+          
+
 config ATA_SFF
 	bool "ATA SFF support"
 	default y

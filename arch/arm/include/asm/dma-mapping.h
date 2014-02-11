@@ -282,7 +282,6 @@ static inline int dmabounce_sync_for_device(struct device *d, dma_addr_t addr,
 	return 1;
 }
 
-
 /**
  * dma_map_single - map a single buffer for streaming DMA
  * @dev: valid struct device pointer, or NULL for ISA and EISA-like devices

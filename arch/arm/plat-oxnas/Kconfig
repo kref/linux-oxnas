@@ -1,0 +1,498 @@
+if (ARCH_OX820)
+
+menu "Oxford Semiconductor NAS Platform options"
+
+config NOMINAL_RPSCLK_FREQ
+	int "The input clock frequency to the RPS"
+	default 25000000
+	help
+		The RPS clock feeds into a prescaler and from there feeds the
+		RPS timers
+
+config ARCH_OXNAS_UART1
+	bool "Support UART1"
+	default n
+	help
+		This enables UART1 to be accessible to Linux.
+		UARTs will be mapped to ttySn numbers from UART1 to UART4, only
+		including those UARTs selected to be present
+
+config ARCH_OXNAS_UART1_MODEM
+	bool "Support UART1 modem control lines"
+	depends on ARCH_OXNAS_UART1
+	default n
+	help
+		Multiplex the modem control lines from UART1 onto external pins
+
+config ARCH_OXNAS_UART2
+	bool "Support UART2"
+	default n
+	help
+		This enables UART2 to be accessible to Linux
+		UARTs will be mapped to ttySn numbers from UART1 to UART4, only
+		including those UARTs selected to be present
+
+config ARCH_OXNAS_UART2_MODEM
+	bool "Support UART2 modem control lines"
+	depends on ARCH_OXNAS_UART2
+	default n
+	help
+		Multiplex the modem control lines from UART2 onto external pins
+
+
+config ARCH_OXNAS_CONSOLE_UART
+	int "The UART displaying console boot messages"
+	default 1 if ARCH_OX820
+	default 2
+	help
+		We should not reset the UART that is already in use as the
+		console during boot
+
+config OXNAS_SATA_POWER_1
+	bool "Allow control of SATA 1 disk power via GPIO"
+	default n
+	help
+		Allow SATA disk 1 power to be turned off via GPIO lines
+
+config OXNAS_SATA_POWER_GPIO_1
+	int "GPIO line connected to SATA power control for disk 1"
+	depends on OXNAS_SATA_POWER_1
+	default 15
+	help
+		The GPIO line that controls SATA disk 1 power
+
+config OXNAS_SATA_POWER_2
+	bool "Allow control of SATA disk 2 power via GPIO"
+	default n
+	help
+		Allow SATA disk 2 power to be turned off via GPIO lines
+
+config OXNAS_SATA_POWER_GPIO_2
+	int "GPIO line connected to SATA power control for disk 2"
+	depends on OXNAS_SATA_POWER_2
+	default 18
+	help
+		The GPIO line that controls SATA disk 2 power
+
+config SRAM_NUM_PAGES
+	int "The number of SRAM memory pages present in the system"
+	default 8
+	help
+		Determines the number of pages of SRAM that are assumed to exist in the
+		system memory map
+
+config SUPPORT_LEON
+	bool "Include support for Leon"
+	default n
+
+config LEON_PAGES
+	int "The number of 4K pages of SRAM to reserve for the LEON program"
+	depends on SUPPORT_LEON
+	default 2
+	help
+		Determines the number of 4K pages of SRAM that are reserved for the
+		LEON program
+
+config LEON_START_EARLY
+	bool "Load LEON early startup program"
+	depends on SUPPORT_LEON
+	default n
+	help
+		For situations where the LEON is to run some code unrelated to
+		its normal network acceleration functions, this options causes
+		the LEON code to be loaded and the LEON started early in the
+		boot process
+
+config LEON_POWER_BUTTON_MONITOR
+	tristate "Load LEON power button monitoring program"
+	depends on SUPPORT_LEON
+	default n
+	help
+		Support powering down the system via a GPIO button and when the
+		system is powered down load a LEON program that will monitor the
+		button for attempts to power the system back on
+
+config OXNAS_POWER_BUTTON_GPIO
+	int "GPIO line connected to power button"
+	depends on LEON_POWER_BUTTON_MONITOR
+	default 11 if OXNAS_VERSION_OX815
+	default 11 if OXNAS_VERSION_OX820
+	default 11 if OXNAS_VERSION_OX825
+	help
+		Specifies the GPIO line to which the power button is connected
+
+config USER_RECOVERY_BUTTON_MONITOR
+	tristate "Load user recovery button monitoring program"
+	default n
+	help
+		Support User recovery of the system via a GPIO button. When the
+		system is power cycled after the use of this button, the admin
+		password and network settings are set to factory values.
+
+config OXNAS_USER_RECOVERY_BUTTON_GPIO
+	int "GPIO line connected to user recovery button"
+	depends on USER_RECOVERY_BUTTON_MONITOR
+	default 6 if OXNAS_VERSION_OX815
+	default 38 if OXNAS_VERSION_OX820
+	default 38 if OXNAS_VERSION_OX825
+	help
+		Specifies the GPIO line to which the user recovery button is 
+		connected.
+
+config DO_MEM_TEST
+	bool "Perform memory copy throughput test during boot"
+	default 0
+
+config DESCRIPTORS_PAGES
+	int "The number of SRAM memory pages to reserve for DMA descriptors"
+	default 1
+	help
+		Determines the number of pages of SRAM that are reserved for DMA
+		descriptors
+
+config ARCH_OXNAS_MAX_SATA_SG_ENTRIES
+	int "The max. number of SG DMA descriptors to use in the single transfer"
+	default 64
+
+config TACHO_THERM_AND_FAN
+	tristate "Include support for the temperature sensing, and automatic fan control"
+	default n
+
+config OXNAS_RTC
+	tristate "Probe for m41t00 RTC"
+	select I2C
+	select I2C_ALGOBIT
+	select I2C_OXNAS_BITBASH
+	select RTC_CLASS
+	select RTC_DRV_DS1307
+	default n
+	help
+	  The M41T00 RTC provides basic time save and restore.
+	  The device is probed for on the OXNAS bit-bash I2C bus.
+
+config I2S
+	tristate "I2S test interface"
+	default n
+	help
+	  Say Y here to use i2s
+	  This support is also available as a module. If so, the module will be
+	  called i2s.
+
+config OXNAS_EARLY_PRINTK
+	bool "Whether to output to printascii from printk"
+	depends on DEBUG_LL
+	help
+		If both CONFIG_DEBUG_LL and this option are selected, then each printk
+		call will duplicate the message in a call to printascii to get very
+		early console output
+
+
+config OXNAS_PHY_TEMPERATURE_MODULE
+	tristate "Creates a loadable module to read temperature of the PHYs"
+	default n
+	help
+		This module publishes the parameters needed to calculate the 
+		temperature of the PCIe and SATA PHYs. The values are returned in the 
+		debugfs in debug/phy-temp-monitor as either sata file or pci file. 
+		Each file contains 2 numbers m1 and m2 which will be read when the file is 
+		read.
+
+
+config OXNAS_AHB_MONITOR_MODULE
+	tristate "Creates a loadable module to control the AHB monitors"
+	default n
+	help
+		This module publishes the current values of the AHB
+		monitors in the /proc filing system.
+		The monitors can be controlled by writing into this
+		filing system
+
+config OXNAS_USB_TEST_MODES
+	tristate "Create a loadable module to control the USB port test modes"
+	default n
+	help
+		This module reports the port status and allows setting
+		of the test mode in the port register via the /proc 
+		filing system.
+
+config OXNAS_I2C_SDA
+	int "I2C bit-bash data line"
+	default 2
+
+config OXNAS_I2C_SCL
+	int "I2C bit-bash clock line"
+	default 3
+
+config OXNAS_USB_PORTA_POWER_CONTROL
+	bool "Support USB port A power control lines"
+	default n
+	help
+		Whether to support power switch out and monitor in via GPIOs
+		for USB port A
+
+config USB_PORTA_POWO_SECONDARY
+	bool "Use USE port A power control secondary MFP function"
+	depends on OXNAS_USB_PORTA_POWER_CONTROL
+	default yes if OXNAS_VERSION_OX815
+	default no if OXNAS_VERSION_OX820
+	default no if OXNAS_VERSION_OX825
+
+config USB_PORTA_POWO_TERTIARY
+	bool "Use USE port A power control tertiary MFP function"
+	depends on OXNAS_USB_PORTA_POWER_CONTROL
+	default no if OXNAS_VERSION_OX815
+	default yes if OXNAS_VERSION_OX820
+	default yes if OXNAS_VERSION_OX825
+
+config USB_PORTA_OVERI_SECONDARY
+	bool "Use USE port A overcurrent secondary MFP function"
+	depends on OXNAS_USB_PORTA_POWER_CONTROL
+	default yes if OXNAS_VERSION_OX815
+	default no if OXNAS_VERSION_OX820
+	default no if OXNAS_VERSION_OX825
+
+config USB_PORTA_OVERI_TERTIARY
+	bool "Use USE port A overcurrent tertiary MFP function"
+	depends on OXNAS_USB_PORTA_POWER_CONTROL
+	default no if OXNAS_VERSION_OX815
+	default yes if OXNAS_VERSION_OX820
+	default yes if OXNAS_VERSION_OX825
+
+config OXNAS_USB_PORTB_POWER_CONTROL
+	bool "Support USB port B power control lines"
+	default n
+	help
+		Whether to support power switch out and monitor in via GPIOs
+		for USB port B
+
+config USB_PORTB_POWO_SECONDARY
+	bool "Use USE port B power control secondary MFP function"
+	depends on OXNAS_USB_PORTB_POWER_CONTROL
+	default no if OXNAS_VERSION_OX815
+	default yes if OXNAS_VERSION_OX820
+	default yes if OXNAS_VERSION_OX825
+
+config USB_PORTB_POWO_TERTIARY
+	bool "Use USE port B power control tertiary MFP function"
+	depends on OXNAS_USB_PORTB_POWER_CONTROL
+	default no if OXNAS_VERSION_OX815
+	default no if OXNAS_VERSION_OX820
+	default no if OXNAS_VERSION_OX825
+
+config USB_PORTB_OVERI_SECONDARY
+	bool "Use USE port B overcurrent secondary MFP function"
+	depends on OXNAS_USB_PORTB_POWER_CONTROL
+	default no if OXNAS_VERSION_OX815
+	default yes if OXNAS_VERSION_OX820
+	default yes if OXNAS_VERSION_OX825
+
+config USB_PORTB_OVERI_TERTIARY
+	bool "Use USE port B overcurrent tertiary MFP function"
+	depends on OXNAS_USB_PORTB_POWER_CONTROL
+	default no if OXNAS_VERSION_OX815
+	default no if OXNAS_VERSION_OX820
+	default no if OXNAS_VERSION_OX825
+
+config OXNAS_USB_OVERCURRENT_POLARITY_NEGATIVE
+	bool "Set USB power monitor input polarity to negative"
+	default n
+	help
+		n - Positive polarity
+		y - Negative polarity
+
+config OXNAS_USB_POWER_SWITCH_POLARITY_NEGATIVE
+	bool "Set USB power switch output polarity to negative"
+	default n
+	help
+		n - Positive polarity
+		y - Negative polarity
+
+config OXNAS_MAP_SRAM
+	bool "Allow part of kernel to be mapped into SRAM"
+	default n
+
+config OXNAS_COPY_CODE_TO_SRAM
+	bool "Copy part of kernel to SRAM"
+	depends on OXNAS_MAP_SRAM
+	default n
+
+config OXNAS_GMAC_AVOID_CACHE_CLEAN
+	bool "Avoid cleaning cache on network Tx"
+	default n
+	help
+		Assume all disk i/o is via DMA so can avoid cleaning cache
+	        before DMA to network if page is mapped to disk and not dirty
+
+config OXNAS_ZERO_COPY_RX_SUPPORT
+	bool "All Rx network packets into ref-counted pages"
+	default n
+
+config OXNAS_GMAC_HLEN
+	int "Amount to copy to skb for zero copy Rx stack"
+	depends on SYNOPSYS_GMAC
+	default 54
+	help
+		The amount of header to copy from a receive packet into the skb
+		buffer to normally avoid having to pull from fragments during
+		receive stack processing
+
+config OXNAS_RX_BUFFER_SIZE
+	int "Size of buffers to queue with network Rx if MTU size is not suitable"
+	default 2044
+	help
+		If zero copy Rx support is not enabled and the MTU is greater than
+		can be described by a single descriptor, then use this as the Rx
+		descriptor size
+		If zero copy Rx support is enabled, then this is always used as the
+		Rx descriptor size
+		Must be a multiple of 4 so that adding NET_IP_ALIGN results in
+		correct IP header alignment for buffer address associated with
+		first descriptor of a received packet. Must leave at least 2
+		bytes spare between buffers when NET_IP_ALIGN and SKB_DATA_ALIGN()
+		have done their work so that the GMAC's ignoring of the 2 lsb of
+		buffer address for middle and end descriptors still results in a
+		pointer within the buffer's total size, which is:
+			SKB_DATA_ALIGN(NET_IP_ALIGN + rx_buffer_size)
+
+config OXNAS_ODRB_DMA_SUPPORT
+	bool "ODRB DMA"
+
+config ODRB_NUM_SATA_PRD_ARRAYS
+	int "Number of normal SATA PRD arrays"
+	default 2
+
+config ODRB_SATA_PRD_ARRAY_SIZE
+	int "Size of PRD tables for normal SATA"
+	default 256
+
+config OXNAS_FAST_SATA_HELPER
+	bool
+
+config OXNAS_FAST_OPEN_FILTER
+	bool
+
+config OXNAS_FAST_READS_AND_WRITES
+	bool "Fast reads/writes"
+	depends on OXNAS_ODRB_DMA_SUPPORT
+	select OXNAS_FAST_OPEN_FILTER
+	default y
+
+config OXNAS_FAST_SATA_PORT
+	int "SATA port used by early fast code"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	default 0
+
+config ODRB_NUM_READER_PRD_ARRAYS
+	int "Number of fast reader PRD arrays"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	default 1
+
+config ODRB_READER_PRD_ARRAY_SIZE
+	int "Number of PRDs per array for fast readers"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	default 64
+
+config ODRB_NUM_WRITER_PRD_ARRAYS
+	int "Number of fast writer PRD arrays"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	default 4
+
+config ODRB_WRITER_PRD_ARRAY_SIZE
+	int "Number of PRDs per array for fast writers"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	default 256
+
+config OXNAS_FAST_READ_ALLOC_ORDER
+	int "Fast read cache blocks will be 4K * 2^N bytes"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	default 6
+
+config OXNAS_FAST_READ_BLOCKS_PER_CACHE
+	int "Fast read caches will each have this number of blocks"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	default 8
+
+config OXNAS_FAST_READ_NUM_BLOCK_CACHES
+	int "Fast read number of block caches"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	default 8
+
+config OXNAS_FAST_READ_NUM_FILL_ENTRIES
+	int "Fast read number of fill entries"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	default 32
+
+config OXNAS_FAST_READ_MAX_READAHEAD_SEARCH
+	int "Maximum number of blocks to look ahead for readahead opportunity"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	default 2
+	help
+		A value of zero will still result in a single
+		block beyond the last requested read position
+		being tested for suitability for readahead
+
+config OXNAS_FAST_READ_MAX_READAHEAD_BLOCKS
+	int "Maximum number of contiguous blocks to readahead"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	default 1
+	help
+		A value of zero will still result in a single
+		block if readahead being performed
+
+config OXNAS_FAST_WRITES_SUPPORT
+	bool
+	depends on OXNAS_ZERO_COPY_RX_SUPPORT
+
+config OXNAS_FAST_WRITES
+	bool "Fast writes"
+	depends on OXNAS_FAST_READS_AND_WRITES
+	select OXNAS_FAST_WRITES_SUPPORT
+	select OXNAS_FAST_WRITE_SYSCALLS
+	default y
+
+config OXNAS_WRITE_ACCUMULATION
+	int "Accumulation size in kBytes"
+	depends on OXNAS_FAST_WRITES
+	default 256
+	
+config OXNAS_WRITE_METADATA_UPDATE_SIZE
+	int "Meta updated every x MBytes"
+	depends on OXNAS_FAST_WRITES
+	default 5
+	
+config OXNAS_WRITE_HOLE_PREALLOC_SIZE
+	int "Preallocate in a hole done using x MByte chunks"
+	depends on OXNAS_FAST_WRITES
+	default 1
+	
+config OXNAS_WRITE_TIMEOUT
+	int "Timeout in milliseconds"
+	depends on OXNAS_FAST_WRITES
+	default 2000
+
+config OXNAS_BACKUP
+	bool "Fast backup"
+	depends on OXNAS_ODRB_DMA_SUPPORT
+	select SATA_OX820
+	select OXNAS_FAST_OPEN_FILTER
+	select OXNAS_FAST_WRITES_SUPPORT
+	select OXNAS_FAST_WRITE_SYSCALLS
+	default y
+	
+config OXNAS_PREALLOC_CHUNK_MB
+	int "Preallocation chunk size - x MB"
+	default 1024
+
+config LEON_WATCHDOG_MODULE
+       tristate "Watchdog module implemented in copro"
+       depends on SUPPORT_LEON
+       default n
+       help
+	For situations where the LEON is to run some code unrelated to
+	its normal network acceleration functions, this options causes
+	the LEON to be loaded with a watchdog program and started early
+	in the boot process
+
+endmenu
+
+endif

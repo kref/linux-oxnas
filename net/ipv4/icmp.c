@@ -212,7 +212,7 @@ static inline struct sock *icmp_xmit_lock(struct net *net)
 
 	sk = icmp_sk(net);
 
-	if (unlikely(!spin_trylock(&sk->sk_lock.slock))) {
+	if (unlikely(!wspin_trylock(&sk->sk_lock.slock))) {
 		/* This can happen if the output path signals a
 		 * dst_link_failure() for an outgoing ICMP packet.
 		 */
@@ -224,7 +224,7 @@ static inline struct sock *icmp_xmit_lock(struct net *net)
 
 static inline void icmp_xmit_unlock(struct sock *sk)
 {
-	spin_unlock_bh(&sk->sk_lock.slock);
+	wspin_unlock_bh(&sk->sk_lock.slock);
 }
 
 /*

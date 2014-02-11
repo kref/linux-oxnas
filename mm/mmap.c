@@ -918,6 +918,13 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	int error;
 	unsigned long reqprot = prot;
 
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+	if (file && unlikely(file->inode) && unlikely(file->inode->filemap_info.map)) {
+printk("do_mmap_pgoff() File %p denying due to FAST mode\n", file);
+		return -EPERM;
+	}
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
 	/*
 	 * Does the application expect PROT_READ to imply PROT_EXEC?
 	 *

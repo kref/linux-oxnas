@@ -105,6 +105,14 @@ void rt2x00queue_map_txskb(struct rt2x00_dev *rt2x00dev, struct sk_buff *skb)
 	 */
 	skb_push(skb, rt2x00dev->hw->extra_tx_headroom);
 
+	if ((int)skb->data & 3) {
+		int align = (int)skb->data & 3;
+		int len = skb->len;
+		skb_push(skb,align);
+		memmove(skb->data, skb->data+align, len);
+		skb_trim(skb, len);
+	}
+
 	skbdesc->skb_dma =
 	    dma_map_single(rt2x00dev->dev, skb->data, skb->len, DMA_TO_DEVICE);
 

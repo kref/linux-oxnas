@@ -16,6 +16,7 @@
 #include <linux/syscalls.h>
 #include <linux/pagemap.h>
 #include <linux/splice.h>
+#include <net/tcp.h>
 #include "read_write.h"
 
 #include <asm/uaccess.h>
@@ -329,6 +330,8 @@ ssize_t do_sync_write(struct file *filp, const char __user *buf, size_t len, lof
 
 EXPORT_SYMBOL(do_sync_write);
 
+extern int do_preallocate(struct file *file, loff_t offset, loff_t len);
+
 ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
@@ -343,6 +346,11 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 	ret = rw_verify_area(WRITE, file, pos, count);
 	if (ret >= 0) {
 		count = ret;
+		ret = do_preallocate(file, *pos, count);
+		if(ret < 0) {
+			/* Error */
+			printk (KERN_INFO "vfs_write: preallocate failed - writing without preallocation\n");
+		}
 		if (file->f_op->write)
 			ret = file->f_op->write(file, buf, count, pos);
 		else
@@ -369,7 +377,139 @@ static inline void file_pos_write(struct file *file, loff_t pos)
 	file->f_pos = pos;
 }
 
-SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
+ssize_t do_sync_direct_netrx_write(
+	struct socket *socket,
+	struct file	  *filp,
+	loff_t		  *ppos,
+	size_t		   len)
+{
+	struct kiocb kiocb;
+	ssize_t		 ret = 0;
+
+	if (unlikely(!filp->f_op || !filp->f_op->aio_direct_netrx_write))
+		return -EINVAL;
+
+	init_sync_kiocb(&kiocb, filp);
+	kiocb.ki_pos = *ppos;
+	kiocb.ki_left = len;
+
+//printk("do_sync_direct_netrx_write() Entered *ppos = %lld, len = %d\n", *ppos, len);
+	/* Write all the network fragments to the file */
+	for (;;) {
+		ret = filp->f_op->aio_direct_netrx_write(
+			&kiocb, oxnas_net_get_bytes, socket->sk);
+		if (likely(ret != -EIOCBRETRY))
+			break;
+
+		printk(KERN_WARNING "kiocb requires re-trying, waiting...\n");
+		wait_on_retry_sync_kiocb(&kiocb);
+	}
+
+	if (unlikely(ret == -EIOCBQUEUED)) {
+		printk(KERN_WARNING "kiocb queued, waiting...\n");
+		ret = wait_on_sync_kiocb(&kiocb);
+	}
+
+	*ppos = kiocb.ki_pos;
+
+//printk("do_sync_direct_netrx_write() Leaving *ppos = %lld, len = %u ret = %d\n", *ppos, len, ret);
+return ret;
+}
+
+ssize_t vfs_direct_netrx_write(
+	struct socket *socket,
+	struct file	  *file,
+	loff_t		  *pos,
+	size_t		   count)
+{
+	ssize_t ret;
+
+	if (unlikely(!(file->f_mode & FMODE_WRITE))) {
+		return -EBADF;
+	}
+
+	ret = do_preallocate(file, *pos, count);
+	if(ret < 0) {
+		/* Error */
+		printk (KERN_INFO "vfs_direct_netrx_write: preallocate failed \n");
+		return ret;
+	}
+
+	ret = do_sync_direct_netrx_write(socket, file, pos, count);
+	if (likely(ret > 0)) {
+		fsnotify_modify(file->f_path.dentry);
+		add_wchar(current, ret);
+	}
+	inc_syscw(current);
+
+	return ret;
+}
+
+SYSCALL_DEFINE4(direct_netrx_write, int, sock_fd, int, file_fd, loff_t __user *,offset, size_t, count)
+{
+	struct file *out_file;
+	int fput_out_needed;
+	struct file *in_file;
+	int fput_in_needed;
+	loff_t pos;
+	ssize_t ret = -EBADF;
+
+	if (unlikely(!count)) return 0;
+
+	in_file = fget_light(sock_fd, &fput_in_needed);
+	if (unlikely(!in_file)) {
+		goto out;
+	}
+	if (unlikely(!(in_file->f_mode & FMODE_READ))) {
+		goto fput_in;
+	}
+
+	out_file = fget_light(file_fd, &fput_out_needed);
+	if (unlikely(!out_file)) {
+		goto fput_in;
+	}
+	if (unlikely(!(out_file->f_mode & FMODE_WRITE))) {
+		goto fput_out;
+	}
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+#ifndef CONFIG_OXNAS_FAST_WRITES
+#warning "Allowing direct_netrx_write() while FAST reads active"
+#else // !CONFIG_OXNAS_FAST_WRITES
+	if (out_file->inode && out_file->inode->filemap_info.map) {
+printk("direct_netrx_write() File %p denying due to FAST mode\n", out_file);
+		goto fput_out;
+	}
+#endif // !CONFIG_OXNAS_FAST_WRITES
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
+	if (offset) {
+		if (unlikely(copy_from_user(&pos, offset, sizeof(loff_t)))) {
+			ret = -EFAULT;
+			goto fput_out;
+		}
+	} else {
+		pos = file_pos_read(out_file);
+	}
+
+	ret = vfs_direct_netrx_write(in_file->private_data, out_file, &pos, count);
+
+	if (offset) {
+		if (unlikely(put_user(pos, offset))) {
+			ret = -EFAULT;
+			goto fput_out;
+		}
+	}
+	file_pos_write(out_file, pos);
+
+fput_out:
+	fput_light(out_file, fput_out_needed);
+fput_in:
+	fput_light(in_file, fput_in_needed);
+out:
+	return ret;
+}
+
+SYSCALL_DEFINE4(read_zcc, unsigned int, fd, char __user *, buf, size_t, count, int __user *, zcc)
 {
 	struct file *file;
 	ssize_t ret = -EBADF;
@@ -377,13 +517,36 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 
 	file = fget_light(fd, &fput_needed);
 	if (file) {
-		loff_t pos = file_pos_read(file);
-		ret = vfs_read(file, buf, count, &pos);
-		file_pos_write(file, pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		if (unlikely(file->inode) && unlikely(file->inode->filemap_info.map)) {
+printk("sys_read_zcc() File %p denying due to FAST mode\n", file);
+			ret = -EPERM;
+		} else {
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+			loff_t pos = file_pos_read(file);
+			ret = vfs_read(file, buf, count, &pos);
+			file_pos_write(file, pos);
+
+			if (zcc && file->f_op->sendpages) {
+				struct socket *socket = file->private_data;
+
+				if (put_user(sock_flag(socket->sk, SOCK_ZCC), zcc)) {
+printk("sys_read_zcc() Failed to copy zcc into userspace pointer\n");
+					ret = -EFAULT;
+				}
+			}
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		}
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		fput_light(file, fput_needed);
 	}
 
 	return ret;
+}
+
+SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
+{
+	return sys_read_zcc(fd, buf, count, 0);
 }
 
 SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
@@ -395,9 +558,22 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 
 	file = fget_light(fd, &fput_needed);
 	if (file) {
-		loff_t pos = file_pos_read(file);
-		ret = vfs_write(file, buf, count, &pos);
-		file_pos_write(file, pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+#ifndef CONFIG_OXNAS_FAST_WRITES
+#warning "Allowing write() while FAST reads active"
+#else // !CONFIG_OXNAS_FAST_WRITES
+		if (unlikely(file->inode) && unlikely(file->inode->filemap_info.map)) {
+printk("write() File %p denying due to FAST mode\n", file);
+			ret = -EPERM;
+		} else {
+#endif // !CONFIG_OXNAS_FAST_WRITES
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+			loff_t pos = file_pos_read(file);
+			ret = vfs_write(file, buf, count, &pos);
+			file_pos_write(file, pos);
+#if defined(CONFIG_OXNAS_FAST_READS_AND_WRITES) && defined(CONFIG_OXNAS_FAST_WRITES)
+		}
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES && !CONFIG_OXNAS_FAST_WRITES
 		fput_light(file, fput_needed);
 	}
 
@@ -416,9 +592,18 @@ SYSCALL_DEFINE(pread64)(unsigned int fd, char __user *buf,
 
 	file = fget_light(fd, &fput_needed);
 	if (file) {
-		ret = -ESPIPE;
-		if (file->f_mode & FMODE_PREAD)
-			ret = vfs_read(file, buf, count, &pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		if (unlikely(file->inode) && unlikely(file->inode->filemap_info.map)) {
+printk("pread64() File %p denying due to FAST mode\n", file);
+			ret = -EPERM;
+		} else {
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+			ret = -ESPIPE;
+			if (file->f_mode & FMODE_PREAD)
+				ret = vfs_read(file, buf, count, &pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		}
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		fput_light(file, fput_needed);
 	}
 
@@ -445,9 +630,18 @@ SYSCALL_DEFINE(pwrite64)(unsigned int fd, const char __user *buf,
 
 	file = fget_light(fd, &fput_needed);
 	if (file) {
-		ret = -ESPIPE;
-		if (file->f_mode & FMODE_PWRITE)  
-			ret = vfs_write(file, buf, count, &pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		if (unlikely(file->inode) && unlikely(file->inode->filemap_info.map)) {
+printk("pwrite64() File %p denying due to FAST mode\n", file);
+			ret = -EPERM;
+		} else {
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+			ret = -ESPIPE;
+			if (file->f_mode & FMODE_PWRITE)  
+				ret = vfs_write(file, buf, count, &pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		}
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		fput_light(file, fput_needed);
 	}
 
@@ -684,6 +878,11 @@ ssize_t vfs_writev(struct file *file, const struct iovec __user *vec,
 	if (!file->f_op || (!file->f_op->aio_write && !file->f_op->write))
 		return -EINVAL;
 
+	if( do_preallocate(file, *pos, vlen) < 0) {
+		/* Error */
+		printk (KERN_INFO "vfs_writev: preallocate failed - writing without preallocate\n");
+	}
+
 	return do_readv_writev(WRITE, file, vec, vlen, pos);
 }
 
@@ -698,9 +897,18 @@ SYSCALL_DEFINE3(readv, unsigned long, fd, const struct iovec __user *, vec,
 
 	file = fget_light(fd, &fput_needed);
 	if (file) {
-		loff_t pos = file_pos_read(file);
-		ret = vfs_readv(file, vec, vlen, &pos);
-		file_pos_write(file, pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		if (unlikely(file->inode) && unlikely(file->inode->filemap_info.map)) {
+printk("readv() File %p denying due to FAST mode\n", file);
+			ret = -EPERM;
+		} else {
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+			loff_t pos = file_pos_read(file);
+			ret = vfs_readv(file, vec, vlen, &pos);
+			file_pos_write(file, pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		}
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		fput_light(file, fput_needed);
 	}
 
@@ -719,9 +927,18 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 
 	file = fget_light(fd, &fput_needed);
 	if (file) {
-		loff_t pos = file_pos_read(file);
-		ret = vfs_writev(file, vec, vlen, &pos);
-		file_pos_write(file, pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		if (unlikely(file->inode) && unlikely(file->inode->filemap_info.map)) {
+printk("writev() File %p denying due to FAST mode\n", file);
+			ret = -EPERM;
+		} else {
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+			loff_t pos = file_pos_read(file);
+			ret = vfs_writev(file, vec, vlen, &pos);
+			file_pos_write(file, pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		}
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		fput_light(file, fput_needed);
 	}
 
@@ -750,9 +967,18 @@ SYSCALL_DEFINE5(preadv, unsigned long, fd, const struct iovec __user *, vec,
 
 	file = fget_light(fd, &fput_needed);
 	if (file) {
-		ret = -ESPIPE;
-		if (file->f_mode & FMODE_PREAD)
-			ret = vfs_readv(file, vec, vlen, &pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		if (unlikely(file->inode) && unlikely(file->inode->filemap_info.map)) {
+printk("preadv() File %p denying due to FAST mode\n", file);
+			ret = -EPERM;
+		} else {
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+			ret = -ESPIPE;
+			if (file->f_mode & FMODE_PREAD)
+				ret = vfs_readv(file, vec, vlen, &pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		}
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		fput_light(file, fput_needed);
 	}
 
@@ -775,9 +1001,18 @@ SYSCALL_DEFINE5(pwritev, unsigned long, fd, const struct iovec __user *, vec,
 
 	file = fget_light(fd, &fput_needed);
 	if (file) {
-		ret = -ESPIPE;
-		if (file->f_mode & FMODE_PWRITE)
-			ret = vfs_writev(file, vec, vlen, &pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		if (unlikely(file->inode) && unlikely(file->inode->filemap_info.map)) {
+printk("pwritev() File %p denying due to FAST mode\n", file);
+			ret = -EPERM;
+		} else {
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+			ret = -ESPIPE;
+			if (file->f_mode & FMODE_PWRITE)
+				ret = vfs_writev(file, vec, vlen, &pos);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		}
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		fput_light(file, fput_needed);
 	}
 
@@ -787,6 +1022,12 @@ SYSCALL_DEFINE5(pwritev, unsigned long, fd, const struct iovec __user *, vec,
 	return ret;
 }
 
+extern int do_incoherent_sendfile(
+	struct file *in_file,
+	struct file *out_file,
+	loff_t      *ppos,
+	size_t       count);
+
 static ssize_t do_sendfile(int out_fd, int in_fd, loff_t *ppos,
 			   size_t count, loff_t max)
 {
@@ -794,7 +1035,7 @@ static ssize_t do_sendfile(int out_fd, int in_fd, loff_t *ppos,
 	struct inode * in_inode, * out_inode;
 	loff_t pos;
 	ssize_t retval;
-	int fput_needed_in, fput_needed_out, fl;
+	int fput_needed_in, fput_needed_out;
 
 	/*
 	 * Get input file, and verify that it is ok..
@@ -849,19 +1090,28 @@ static ssize_t do_sendfile(int out_fd, int in_fd, loff_t *ppos,
 		count = max - pos;
 	}
 
-	fl = 0;
+	if (in_file->f_op && in_file->f_op->sendfile && out_file->f_op->sendpages) {
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+//printk("Incoherent sendfile file %p, pos %lld, count %d\n",in_file, *ppos, count);
+		retval = do_incoherent_sendfile(in_file, out_file, ppos, count);
+#else // CONFIG_OXNAS_FAST_READS_AND_WRITES
+//printk("Incoherent sendfile complete, file %p, retval %d\n", in_file, retval);
+		retval = in_file->f_op->sendfile(in_file, ppos, count, file_send_actor, out_file);
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+	} else {
+		int fl = 0;
 #if 0
-	/*
-	 * We need to debate whether we can enable this or not. The
-	 * man page documents EAGAIN return for the output at least,
-	 * and the application is arguably buggy if it doesn't expect
-	 * EAGAIN on a non-blocking file descriptor.
-	 */
-	if (in_file->f_flags & O_NONBLOCK)
-		fl = SPLICE_F_NONBLOCK;
+		/*
+		 * We need to debate whether we can enable this or not. The
+		 * man page documents EAGAIN return for the output at least,
+		 * and the application is arguably buggy if it doesn't expect
+		 * EAGAIN on a non-blocking file descriptor.
+		 */
+		if (in_file->f_flags & O_NONBLOCK)
+			fl = SPLICE_F_NONBLOCK;
 #endif
-	retval = do_splice_direct(in_file, ppos, out_file, count, fl);
-
+		retval = do_splice_direct(in_file, ppos, out_file, count, fl);
+	}
 	if (retval > 0) {
 		add_rchar(current, retval);
 		add_wchar(current, retval);
@@ -915,3 +1165,4 @@ SYSCALL_DEFINE4(sendfile64, int, out_fd, int, in_fd, loff_t __user *, offset, si
 
 	return do_sendfile(out_fd, in_fd, NULL, count, 0);
 }
+

@@ -116,6 +116,10 @@ ENTRY(secondary_startup)
 	movs	r10, r5				@ invalid processor?
 	moveq	r0, #'p'			@ yes, error 'p'
 	beq	__error
+#if defined(CONFIG_ARCH_OX820) 
+    mov r4, #0
+    mcr p15, 0, r4, c7, c7, 0 @ invalidate both caches and branch target cache 
+#endif
 
 	/*
 	 * Use the page tables supplied from  __cpu_up.

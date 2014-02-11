@@ -18,6 +18,10 @@
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 
+#ifdef CONFIG_OXNAS_FAST_WRITES
+extern inline loff_t i_tent_size_read(const struct inode *inode);
+#endif // CONFIG_OXNAS_FAST_WRITES
+
 void generic_fillattr(struct inode *inode, struct kstat *stat)
 {
 	stat->dev = inode->i_sb->s_dev;
@@ -31,6 +35,14 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 	stat->mtime = inode->i_mtime;
 	stat->ctime = inode->i_ctime;
 	stat->size = i_size_read(inode);
+#ifdef CONFIG_OXNAS_FAST_WRITES
+	{
+//		loff_t temp = stat->size;
+		loff_t tent_size = i_tent_size_read(inode);
+		stat->size = (tent_size > stat->size) ? tent_size : stat->size;
+//if (inode->fast_open_count) printk("generic_fillattr() inode %p, i_size %lld, tent %lld, size %lld\n", inode, temp, tent_size, stat->size);
+	}
+#endif //CONFIG_OXNAS_FAST_WRITES
 	stat->blocks = inode->i_blocks;
 	stat->blksize = (1 << inode->i_blkbits);
 }

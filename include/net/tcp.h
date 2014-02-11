@@ -299,6 +299,7 @@ extern int		    	tcp_v4_tw_remember_stamp(struct inet_timewait_sock *tw);
 extern int			tcp_sendmsg(struct kiocb *iocb, struct socket *sock,
 					    struct msghdr *msg, size_t size);
 extern ssize_t			tcp_sendpage(struct socket *sock, struct page *page, int offset, size_t size, int flags);
+extern ssize_t			tcp_sendpages(struct socket *sock, struct page **page, int offset, size_t size, int flags);
 
 extern int			tcp_ioctl(struct sock *sk, 
 					  int cmd, 
@@ -514,6 +515,30 @@ typedef int (*sk_read_actor_t)(read_descriptor_t *, struct sk_buff *,
 				unsigned int, size_t);
 extern int tcp_read_sock(struct sock *sk, read_descriptor_t *desc,
 			 sk_read_actor_t recv_actor);
+
+typedef struct oxnas_net_get_bytes_args {
+	struct sock    *sk;
+	char           *ptr;
+	size_t          len;
+	size_t          preadvance;
+	struct sk_buff *cached_skb;
+	u32             cached_offset;
+	int             cleanup;
+} oxnas_net_get_bytes_args_t;
+
+extern int oxnas_net_get_bytes(oxnas_net_get_bytes_args_t *args);
+
+typedef int (*oxnas_net_rx_actor_t)(
+        read_descriptor_t *desc,
+        struct sk_buff    *skb,
+        u32                offset);
+
+extern ssize_t oxnas_net_read_sock(
+        struct sock          *sk,
+        read_descriptor_t    *desc,
+        oxnas_net_rx_actor_t  actor,
+        int                   block,
+		size_t               *bytes_read);
 
 extern void tcp_initialize_rcv_mss(struct sock *sk);
 

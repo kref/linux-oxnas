@@ -122,8 +122,13 @@ int fiemap_fill_next_extent(struct fiemap_extent_info *fieinfo, u64 logical,
 	extent.fe_flags = flags;
 
 	dest += fieinfo->fi_extents_mapped;
-	if (copy_to_user(dest, &extent, sizeof(extent)))
-		return -EFAULT;
+
+	if(fieinfo->fi_flags & FIEMAP_KERNEL_READ) {
+		memcpy(dest, &extent, sizeof(extent));
+	} else {
+		if (copy_to_user(dest, &extent, sizeof(extent)))
+			return -EFAULT;
+	}
 
 	fieinfo->fi_extents_mapped++;
 	if (fieinfo->fi_extents_mapped == fieinfo->fi_extents_max)

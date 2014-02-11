@@ -1033,11 +1033,29 @@ static void do_generic_file_read(struct file *filp, loff_t *ppos,
 	unsigned int prev_offset;
 	int error;
 
-	index = *ppos >> PAGE_CACHE_SHIFT;
+    // Page table mod's
+#define MAX_QUEUED_PAGES (65536/PAGE_CACHE_SIZE)
+	// Create the page table
+	struct page* page_table[MAX_QUEUED_PAGES];
+	pgoff_t start_index;
+	unsigned long loop_offset;
+	unsigned long transfer_count;
+	unsigned long start_desc_count;
+	unsigned long index_count;
+	unsigned long desc_remaining;     
+
+    index = *ppos >> PAGE_CACHE_SHIFT;
 	prev_index = ra->prev_pos >> PAGE_CACHE_SHIFT;
 	prev_offset = ra->prev_pos & (PAGE_CACHE_SIZE-1);
 	last_index = (*ppos + desc->count + PAGE_CACHE_SIZE-1) >> PAGE_CACHE_SHIFT;
 	offset = *ppos & ~PAGE_CACHE_MASK;
+
+    // Page table mod's
+	start_index = index;
+	index_count = 0;
+	transfer_count = 0;
+	desc_remaining = desc->count;
+	loop_offset = offset;
 
 	for (;;) {
 		struct page *page;
@@ -1093,12 +1111,12 @@ page_ok:
 		nr = PAGE_CACHE_SIZE;
 		if (index == end_index) {
 			nr = ((isize - 1) & ~PAGE_CACHE_MASK) + 1;
-			if (nr <= offset) {
+			if (nr <= loop_offset) {
 				page_cache_release(page);
 				goto out;
 			}
 		}
-		nr = nr - offset;
+		nr = nr - loop_offset;
 
 		/* If users can be writing to this page using arbitrary
 		 * virtual addresses, take care about potential aliasing
@@ -1111,7 +1129,7 @@ page_ok:
 		 * When a sequential read accesses a page several times,
 		 * only mark it as accessed the first time.
 		 */
-		if (prev_index != index || offset != prev_offset)
+		if (prev_index != index || loop_offset != prev_offset)
 			mark_page_accessed(page);
 		prev_index = index;
 
@@ -1125,16 +1143,67 @@ page_ok:
 		 * "pos" here (the actor routine has to update the user buffer
 		 * pointers and the remaining count).
 		 */
-		ret = actor(desc, page, offset, nr);
-		offset += ret;
-		index += offset >> PAGE_CACHE_SHIFT;
-		offset &= ~PAGE_CACHE_MASK;
-		prev_offset = offset;
+        page_table[index_count] = page;
 
-		page_cache_release(page);
-		if (ret == nr && desc->count)
-			continue;
-		goto out;
+        index_count++;
+
+        transfer_count += nr;
+
+        if (transfer_count >= desc->count) {            
+            loop_offset += desc_remaining;
+            index += loop_offset >> PAGE_CACHE_SHIFT;            
+            loop_offset &= ~PAGE_CACHE_MASK;
+            desc_remaining = 0;
+        } else {            
+            loop_offset = 0;
+            index++;
+            desc_remaining -= nr;
+        }
+
+        prev_offset = loop_offset;
+        //ra.prev_offset = loop_offset;
+
+        /**
+         *  Do we have enough data in the pages so far, or enough
+         *  pages left, to satisfy the count specified in the descriptor ?
+         */
+        if ((transfer_count < desc->count) && (index <= end_index) && (index_count < MAX_QUEUED_PAGES)) {
+            continue;
+        }
+        
+    /*
+     * The actor routine returns how many bytes were actually used..
+     * NOTE! This may not be the same as how much of a user buffer
+     * we filled up (we may be padding etc), so we can only update
+     * "pos" here (the actor routine has to update the user buffer
+     * pointers and the remaining count).
+     */
+
+    start_desc_count = desc->count;
+
+    ret = actor(desc, page_table, offset, transfer_count);
+
+    offset += ret;
+    index = start_index + (offset >> PAGE_CACHE_SHIFT);
+
+    offset &= ~PAGE_CACHE_MASK;
+    //ra.prev_offset = offset;
+
+    while (index_count) {
+        index_count--;
+        page_cache_release(page_table[index_count]);
+    }
+
+    if (ret == transfer_count && desc->count) {
+        // should probably think of what to do...
+        index_count = 0;
+        start_index = index;
+        transfer_count = 0;
+        loop_offset = offset;
+        desc_remaining = desc->count;
+        continue;
+    }
+    goto out;
 
 page_not_up_to_date:
 		/* Get exclusive access to the page ... */
@@ -1228,42 +1297,86 @@ out:
 	file_accessed(filp);
 }
 
-int file_read_actor(read_descriptor_t *desc, struct page *page,
+int file_read_actor(read_descriptor_t *desc, struct page **page,
 			unsigned long offset, unsigned long size)
 {
 	char *kaddr;
 	unsigned long left, count = desc->count;
+    unsigned char* dst;
+    unsigned long ret_size;
 
 	if (size > count)
 		size = count;
+
+    ret_size = size;
+    dst = desc->arg.buf;
 
 	/*
 	 * Faults on the destination of a read are common, so do it before
 	 * taking the kmap.
 	 */
-	if (!fault_in_pages_writeable(desc->arg.buf, size)) {
-		kaddr = kmap_atomic(page, KM_USER0);
-		left = __copy_to_user_inatomic(desc->arg.buf,
-						kaddr + offset, size);
-		kunmap_atomic(kaddr, KM_USER0);
-		if (left == 0)
-			goto success;
-	}
+    while (size) {            
+        unsigned long psize = PAGE_CACHE_SIZE - offset;
+        struct page *page_it;
 
-	/* Do it the slow way */
-	kaddr = kmap(page);
-	left = __copy_to_user(desc->arg.buf, kaddr + offset, size);
-	kunmap(page);
+        psize = PAGE_CACHE_SIZE - offset;
+        if (size <= psize)
+            psize = size;
 
-	if (left) {
-		size -= left;
-		desc->error = -EFAULT;
-	}
+        if (fault_in_pages_writeable(dst, psize))
+            break;
+
+        page_it = *page;
+
+        kaddr = kmap_atomic(page_it, KM_USER0);
+        left = __copy_to_user_inatomic(dst, kaddr + offset, psize);
+        kunmap_atomic(kaddr, KM_USE R0);
+        if (left != 0)
+            break;
+
+        size -= psize;
+        page++;
+        offset += psize;
+        dst += psize;
+        offset &= (PAGE_CACHE_SIZE - 1);
+    }
+
+    if (size == 0)
+        goto success;
+
+    while (size) {
+        unsigned long psize;
+        struct page *page_it;
+
+        psize = PAGE_CACHE_SIZE - offset;
+        if (size <= psize)
+            psize = size;
+
+        page_it = *page;
+
+        kaddr = kmap(page_it);
+
+        left = __copy_to_user(dst, kaddr + offset, psize);
+        kunmap(page_it);
+
+        if (left) {
+            size -= left;
+            desc->error = -EFAULT;
+            break;
+        }
+
+        page++;
+        offset += psize;
+        dst += psize;            
+        offset &= (PAGE_CACHE_SIZE - 1);
+        size -= psize;
+    }
+
 success:
-	desc->count = count - size;
-	desc->written += size;
-	desc->arg.buf += size;
-	return size;
+	desc->count = count - ret_size;
+	desc->written += ret_size;
+	desc->arg.buf += ret_size;
+	return ret_size;
 }
 
 /*
@@ -1379,6 +1492,46 @@ out:
 	return retval;
 }
 EXPORT_SYMBOL(generic_file_aio_read);
+
+int file_send_actor(read_descriptor_t * desc, struct page **page, unsigned long offset, unsigned long size)
+{
+    ssize_t written;
+	unsigned long count = desc->count;
+	struct file *file = desc->arg.data;
+
+	if (size > count)
+		size = count;
+
+	written = file->f_op->sendpages(file, page, offset,
+				       size, &file->f_pos, size<count);
+	if (written < 0) {
+		desc->error = written;
+		written = 0;
+	}
+	desc->count = count - written;
+	desc->written += written;
+	return written;
+}
+
+ssize_t generic_file_sendfile(struct file *in_file, loff_t *ppos,
+			 size_t count, read_actor_t actor, void *target)
+{
+	read_descriptor_t desc;
+
+	if (!count)
+		return 0;
+
+	desc.written = 0;
+	desc.count = count;
+	desc.arg.data = target;
+	desc.error = 0;
+
+	do_generic_file_read(in_file, ppos, &desc, actor);
+	if (desc.written)
+		return desc.written;
+	return desc.error;
+}
+EXPORT_SYMBOL(generic_file_sendfile);
 
 static ssize_t
 do_readahead(struct address_space *mapping, struct file *filp,
@@ -2267,6 +2420,9 @@ again:
 		if (unlikely(status))
 			break;
 
+		if (mapping_writably_mapped(mapping))
+			flush_dcache_page(page);
+
 		pagefault_disable();
 		copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
 		pagefault_enable();
@@ -2347,6 +2503,232 @@ generic_file_buffered_write(struct kiocb *iocb, const struct iovec *iov,
 	return written ? written : status;
 }
 EXPORT_SYMBOL(generic_file_buffered_write);
+
+typedef struct oxnas_net_get_bytes_args {
+	struct sock    *sk;
+	char           *ptr;
+	size_t          len;
+	size_t          preadvance;
+	struct sk_buff *cached_skb;
+	u32             cached_offset;
+	int             cleanup;
+} oxnas_net_get_bytes_args_t;
+
+typedef int (*oxnas_net_get_bytes_t)(oxnas_net_get_bytes_args_t *args);
+
+extern void release_sock(struct sock *sk);
+extern void lock_sock_nested(struct sock *sk, int subclass);
+
+#define NET_BYTES_CLEANUP_LIMIT	(62*1024)
+static ssize_t generic_perform_direct_netrx_write(
+	struct file *file,
+	void        *callback,
+	void        *sock,
+	u32          length,
+	loff_t       pos)
+{
+	struct address_space                  *mapping = file->f_mapping;
+	const struct address_space_operations *a_ops = mapping->a_ops;
+	struct sock                           *sk = (struct sock*)sock;
+	long                                   status = 0;
+	ssize_t                                written = 0;
+	int                                    pages_dirtied = 0;
+	size_t								   net_bytes_since_cleanup = 0;
+
+	oxnas_net_get_bytes_args_t get_bytes_args = {
+		.sk = sk,
+		.ptr = NULL,
+		.len = 0,
+		.preadvance = 0,
+		.cached_skb = NULL,
+		.cached_offset = 0,
+		.cleanup = 0
+	};
+
+//printk("generic_perform_direct_netrx_write() Entered, want %d bytes from pos %lld\n", length, pos);
+	while(1) {
+		struct page *page;
+		u32          offset;
+		u32          bytes;
+		void        *fsdata;
+		u32          page_remaining;
+		size_t       copied = 0;
+		int          net_status = 0;
+		int          exhausted_net_bytes = 0;
+
+		/* Calculate the offset into the current pagecache page */
+		offset = (pos & (PAGE_CACHE_SIZE - 1));
+
+		/* Try to get enough contiguous bytes from the network receive stream
+		   to fill the remaining space in the page, ensuring we limit to the
+		   total remaining transfer length */
+		bytes = min_t(u32, PAGE_CACHE_SIZE - offset, length);
+
+		status = a_ops->write_begin(file, mapping, pos, bytes,
+			AOP_FLAG_UNINTERRUPTIBLE, &page, &fsdata);
+
+		/* Do socket locking ourselves to avoid thrashing the lock */
+		lock_sock_nested(sk, 0);
+
+		if (unlikely(status)) {
+//printk("generic_perform_direct_netrx_write() write_begin failed\n");
+			break;
+		}
+
+		page_remaining = bytes;
+//printk("generic_perform_direct_netrx_write() Want %d bytes from page\n", page_remaining);
+		while (!net_status && page_remaining) {
+			size_t bytes_from_netrx;
+
+			get_bytes_args.len = page_remaining;
+			while (1) {
+//printk("generic_perform_direct_netrx_write() Trying for %d bytes\n", get_bytes_args.len);
+				net_status = ((oxnas_net_get_bytes_t)callback)(&get_bytes_args);
+
+//if (net_status == -ERESTARTSYS) {
+//	printk("generic_perform_direct_netrx_write() -ERESTARTSYS\n");
+//}
+//else if (net_status == -EINTR) {
+//	printk("generic_perform_direct_netrx_write() -EINTR\n");
+//}
+//else if (net_status == -EAGAIN) {
+//	printk("generic_perform_direct_netrx_write() -EAGAIN\n");
+//}
+//else if (net_status < 0) {
+//	printk("generic_perform_direct_netrx_write() error %d\n", net_status);
+//}
+				/* Retry if the network receive timed out or was interrupted */
+				if (likely((net_status != -EAGAIN) &&
+					       (net_status != -ERESTARTSYS) &&
+					       (net_status != -EINTR))) {
+					bytes_from_netrx = get_bytes_args.len;
+					break;
+				}
+//printk("generic_perform_direct_netrx_write() Callback timed-out, retrying\n");
+			}
+//printk("generic_perform_direct_netrx_write() Got %d bytes, at address %p, net_status = %d\n", bytes_from_netrx, get_bytes_args.ptr, net_status);
+
+			if (unlikely(!bytes_from_netrx)) {
+				exhausted_net_bytes = 1;
+				break;
+			}
+
+			/* CPU copy the data from network packets into the pagecache page */
+			memcpy(page_address(page) + offset, get_bytes_args.ptr, bytes_from_netrx);
+
+			/* Should allow window etc calculations to happen regularly */
+			net_bytes_since_cleanup += bytes_from_netrx;
+			if (net_bytes_since_cleanup >= NET_BYTES_CLEANUP_LIMIT) {
+				get_bytes_args.cleanup = 1;
+				get_bytes_args.len = net_bytes_since_cleanup;
+				((oxnas_net_get_bytes_t)callback)(&get_bytes_args);
+				get_bytes_args.cleanup = 0;
+				net_bytes_since_cleanup = 0;
+			}
+
+			/* Account for the data copied into the current page */
+			page_remaining -= bytes_from_netrx;
+			offset += bytes_from_netrx;
+			copied += bytes_from_netrx;
+		}
+//printk("generic_perform_direct_netrx_write() %d bytes not got from page, net_status = %d, copied = %d\n", page_remaining, net_status, copied);
+
+		/* Do socket locking ourselves to avoid thrashing the lock */
+		release_sock(sk);
+
+		/* Make kernel and user views of pagecache page coherent */
+		flush_dcache_page(page);
+
+		status = a_ops->write_end(file, mapping, pos, bytes, copied, page, fsdata);
+		if (unlikely(status < 0)) {
+			lock_sock_nested(sk, 0);
+//printk("generic_perform_direct_netrx_write() write_end failed\n");
+			break;
+		}
+		copied = status;
+//printk("generic_perform_direct_netrx_write() write_end -> copied = %d\n", copied);
+
+		/* We just wrote some data into the current pagecache page */
+		++pages_dirtied;
+
+		pos += copied;
+		written += copied;
+
+		/* Recalculate remaining total transfer length */
+		status = net_status;
+		length -= copied;
+//printk("generic_perform_direct_netrx_write() written = %d, pos = %lld, length = %u\n", written, pos, length);
+		if (!length || status || exhausted_net_bytes) {
+			lock_sock_nested(sk, 0);
+//printk("generic_perform_direct_netrx_write() %d bytes remaining, status = %d, exhausted_net_bytes = %d\n", length, status, exhausted_net_bytes);
+			break;
+		}
+
+#if 0
+		/* Not sure if we need this or whether it just wastes time during Samba
+		 * writes. Iozone testing shows no repeatable difference either way
+		 */
+		cond_resched();
+#endif
+	}
+
+	/* Should allow window etc calculations to happen regularly */
+	if (net_bytes_since_cleanup) {
+		get_bytes_args.cleanup = 1;
+		get_bytes_args.len = net_bytes_since_cleanup;
+		((oxnas_net_get_bytes_t)callback)(&get_bytes_args);
+	}
+
+	/* Do socket locking ourselves to avoid thrashing the lock */
+	release_sock(sk);
+
+	/* Calling once for all pages written, rather than once per page would
+	   seem a sensible optimisation especially as Samba will typically only
+	   write a maximum of 64K at a time */
+	balance_dirty_pages_ratelimited_nr(mapping, pages_dirtied);
+
+//if (length) {
+//	printk("generic_perform_direct_netrx_write() length remaining %d\n", length);
+//}
+//printk("generic_perform_direct_netrx_write() Leaving, written %d, status %ld\n", written, status);
+	return written ? written : status;
+}
+
+ssize_t generic_file_direct_netrx_write(
+	struct kiocb *iocb,
+	void         *callback,
+	void         *sock,
+	loff_t        pos,
+	loff_t       *ppos,
+	u32           count,
+	ssize_t       written)
+{
+	struct file                           *file = iocb->ki_filp;
+	struct address_space                  *mapping = file->f_mapping;
+	const struct address_space_operations *a_ops = mapping->a_ops;
+	struct inode                          *inode = mapping->host;
+	ssize_t                                status;
+
+	status = generic_perform_direct_netrx_write(file, callback, sock, count, pos);
+	if (likely(status >= 0)) {
+		written += status;
+		*ppos = pos + status;
+
+		/*
+		 * For now, when the user asks for O_SYNC, we'll actually give
+		 * O_DSYNC
+		 */
+		if (unlikely((file->f_flags & O_SYNC) || IS_SYNC(inode))) {
+			if (!a_ops->writepage || !is_sync_kiocb(iocb))
+				status = generic_osync_inode(inode, mapping,
+						OSYNC_METADATA|OSYNC_DATA);
+		}
+  	}
+
+	//printk("generic_file_direct_netrx_write() written %d, status %d\n", written , status);
+	return written ? written : status;
+}
+EXPORT_SYMBOL(generic_file_direct_netrx_write);
 
 static ssize_t
 __generic_file_aio_write_nolock(struct kiocb *iocb, const struct iovec *iov,

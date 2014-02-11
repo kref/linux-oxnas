@@ -754,6 +754,19 @@ asmlinkage long sys_pselect6(int, fd_set __user *, fd_set __user *,
 asmlinkage long sys_ppoll(struct pollfd __user *, unsigned int,
 			  struct timespec __user *, const sigset_t __user *,
 			  size_t);
+asmlinkage long sys_samba_reserve(int fd, loff_t __user *start, loff_t __user *length);
+asmlinkage long sys_direct_netrx_write(int sock_fd, int file_fd, loff_t __user *offset, size_t count);
+asmlinkage long sys_read_zcc(unsigned int fd, char __user *buf, size_t count, int __user *zcc);
+
+#ifdef CONFIG_OXNAS_FAST_WRITES
+asmlinkage long sys_direct_disk_write(int sock_fd, int file_fd, loff_t __user *offset, size_t count);
+#endif // CONFIG_OXNAS_FAST_WRITES
+
+#ifdef CONFIG_OXNAS_BACKUP
+asmlinkage long sys_init_backup(int sock_in_fd);
+asmlinkage long sys_exit_backup(int sock_in_fd);
+asmlinkage long sys_xfsbackup(int sock_in_fd, int file_out_fd, loff_t __user *count);
+#endif // CONFIG_OXNAS_BACKUP
 
 int kernel_execve(const char *filename, char *const argv[], char *const envp[]);
 

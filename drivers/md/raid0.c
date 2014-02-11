@@ -22,6 +22,9 @@
 #include <linux/seq_file.h>
 #include "md.h"
 #include "raid0.h"
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
+#include "hwraid.h"
+#endif
 
 static void raid0_unplug(struct request_queue *q)
 {
@@ -250,13 +253,23 @@ static int create_strip_zones(mddev_t *mddev)
 		       mddev->chunk_sectors << 9);
 		goto abort;
 	}
-
-	blk_queue_io_min(mddev->queue, mddev->chunk_sectors << 9);
-	blk_queue_io_opt(mddev->queue,
-			 (mddev->chunk_sectors << 9) * mddev->raid_disks);
-
-	printk(KERN_INFO "raid0: done.\n");
-	mddev->private = conf;
+	
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
+    if (hwraid0_compatible(mddev, conf)) {
+	    /* switch to hardware raid */
+	    err = hwraid0_assemble(mddev, conf);
+	    if (err) {
+	        goto abort;
+	    }
+	} else
+#endif /* CONFIG_SATA_OX820_DIRECT_HWRAID */	    
+	{
+        blk_queue_io_min(mddev->queue, mddev->chunk_sectors << 9);
+        blk_queue_io_opt(mddev->queue,
+                 (mddev->chunk_sectors << 9) * mddev->raid_disks);
+    }
+    printk(KERN_INFO "raid0: done.\n");
+    mddev->private = conf;
 	return 0;
 abort:
 	kfree(conf->strip_zone);
@@ -359,7 +372,14 @@ static int raid0_stop(mddev_t *mddev)
 {
 	raid0_conf_t *conf = mddev->private;
 
-	blk_sync_queue(mddev->queue); /* the unplug fn references 'conf'*/
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
+	if (mddev->hw_raid) {
+	    hwraid0_stop(mddev, conf);
+	} else
+#endif	    
+	{
+	    blk_sync_queue(mddev->queue); /* the unplug fn references 'conf'*/
+	}
 	kfree(conf->strip_zone);
 	kfree(conf->devlist);
 	kfree(conf);

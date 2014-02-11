@@ -1784,6 +1784,14 @@ unsigned ata_exec_internal_sg(struct ata_device *dev,
 		return AC_ERR_SYSTEM;
 	}
 
+	if (ap->ops->acquire_hw && !ap->ops->acquire_hw(ap->port_no, 0, 0)) {
+		spin_unlock_irqrestore(ap->lock, flags);
+		if (!ap->ops->acquire_hw(ap->port_no, 1, (2*HZ))) {
+			return AC_ERR_TIMEOUT;
+		}
+		spin_lock_irqsave(ap->lock, flags);
+	}
+
 	/* initialize internal qc */
 
 	/* XXX: Tag 0 is used for drivers with legacy EH as some
@@ -4073,10 +4081,25 @@ int ata_dev_reread_id(struct ata_device *dev, unsigned int readid_flags)
 	unsigned int class = dev->class;
 	u16 *id = (void *)dev->link->ap->sector_buf;
 	int rc;
+	int tries = 5;
+	unsigned int old_flags = dev->link->ap->pflags;
 
-	/* read ID data */
-	rc = ata_dev_read_id(dev, &class, readid_flags, id);
-	if (rc)
+    /* Keep trying for until we're sure it's broken */
+	while (tries--) {
+	    /* If the port is frozen, reset it to the starting state so we
+	     * might try the identify command again
+	     */
+        if (dev->link->ap->pflags & ATA_PFLAG_FROZEN ) {
+            dev->link->ap->pflags = old_flags;
+        }
+
+	    /* read ID data */
+        rc = ata_dev_read_id(dev, &class, readid_flags, id);
+        if (rc == 0)
+            break;
+    }
+    
+    if (rc)
 		return rc;
 
 	/* is the device still there? */
@@ -4847,6 +4870,9 @@ static struct ata_queued_cmd *ata_qc_new(struct ata_port *ap)
 	if (unlikely(ap->pflags & ATA_PFLAG_FROZEN))
 		return NULL;
 
+	if (ap->ops->qc_new(ap))
+		return NULL;
+
 	/* the last tag is reserved for internal command. */
 	for (i = 0; i < ATA_MAX_QUEUE - 1; i++)
 		if (!test_and_set_bit(i, &ap->qc_allocated)) {
@@ -4907,6 +4933,8 @@ void ata_qc_free(struct ata_queued_cmd *qc)
 	if (likely(ata_tag_valid(tag))) {
 		qc->tag = ATA_TAG_POISON;
 		clear_bit(tag, &ap->qc_allocated);
+
+		ap->ops->qc_free(qc);
 	}
 }
 
@@ -5162,8 +5190,8 @@ void ata_qc_issue(struct ata_queued_cmd *qc)
 	}
 
 	ap->ops->qc_prep(qc);
-
 	qc->err_mask |= ap->ops->qc_issue(qc);
+
 	if (unlikely(qc->err_mask))
 		goto err;
 	return;
@@ -6040,6 +6068,7 @@ void ata_host_init(struct ata_host *host, struct device *dev,
 	host->ops = ops;
 }
 
+#ifndef CONFIG_ATA_SYNC_DISK_PROBE
 
 static void async_port_probe(void *data, async_cookie_t cookie)
 {
@@ -6061,6 +6090,7 @@ static void async_port_probe(void *data, async_cookie_t cookie)
 		struct ata_eh_info *ehi = &ap->link.eh_info;
 		unsigned long flags;
 
+		DPRINTK("ata%u: bus probe begin\n", ap->print_id);
 		ata_port_probe(ap);
 
 		/* kick EH for boot probing */
@@ -6077,7 +6107,9 @@ static void async_port_probe(void *data, async_cookie_t cookie)
 		spin_unlock_irqrestore(ap->lock, flags);
 
 		/* wait for EH to finish */
+		DPRINTK("ata%u: bus probe wait\n", ap->print_id);
 		ata_port_wait_eh(ap);
+		DPRINTK("ata%u: bus probe end\n", ap->print_id);
 	} else {
 		DPRINTK("ata%u: bus probe begin\n", ap->print_id);
 		rc = ata_bus_probe(ap);
@@ -6099,6 +6131,8 @@ static void async_port_probe(void *data, async_cookie_t cookie)
 	ata_scsi_scan_host(ap, 1);
 
 }
+#endif /* CONFIG_ATA_SYNC_DISK_PROBE */
+
 /**
  *	ata_host_register - register initialized ATA host
  *	@host: ATA host to register
@@ -6174,11 +6208,69 @@ int ata_host_register(struct ata_host *host, struct scsi_host_template *sht)
 			ata_port_printk(ap, KERN_INFO, "DUMMY\n");
 	}
 
+#ifndef CONFIG_ATA_SYNC_DISK_PROBE
 	/* perform each probe asynchronously */
 	for (i = 0; i < host->n_ports; i++) {
 		struct ata_port *ap = host->ports[i];
 		async_schedule(async_port_probe, ap);
 	}
+#else
+	/* perform each probe synchronously */
+	DPRINTK("probe begin\n");
+	for (i = 0; i < host->n_ports; i++) {
+		struct ata_port *ap = host->ports[i];
+    
+        /* probe */
+        if (ap->ops->error_handler) {
+            struct ata_eh_info *ehi = &ap->link.eh_info;
+            unsigned long flags;
+    
+            DPRINTK("ata%u: bus probe begin\n", ap->print_id);
+            ata_port_probe(ap);
+    
+            /* kick EH for boot probing */
+            spin_lock_irqsave(ap->lock, flags);
+    
+            ehi->probe_mask |= ATA_ALL_DEVICES;
+            ehi->action |= ATA_EH_RESET | ATA_EH_LPM;
+            ehi->flags |= ATA_EHI_NO_AUTOPSY | ATA_EHI_QUIET;
+    
+            ap->pflags &= ~ATA_PFLAG_INITIALIZING;
+            ap->pflags |= ATA_PFLAG_LOADING;
+            ata_port_schedule_eh(ap);
+    
+            spin_unlock_irqrestore(ap->lock, flags);
+    
+            /* wait for EH to finish */
+            DPRINTK("ata%u: bus probe wait\n", ap->print_id);
+            ata_port_wait_eh(ap);
+            DPRINTK("ata%u: bus probe end\n", ap->print_id);
+        } else {
+            DPRINTK("ata%u: bus probe begin\n", ap->print_id);
+            rc = ata_bus_probe(ap);
+            DPRINTK("ata%u: bus probe end\n", ap->print_id);
+    
+            if (rc) {
+                /* FIXME: do something useful here?
+                 * Current libata behavior will
+                 * tear down everything when
+                 * the module is removed
+                 * or the h/w is unplugged.
+                 */
+            }
+        }
+	}
+	DPRINTK("probe end\n");
+
+	/* probes are done, now scan each port's disk(s) */
+	DPRINTK("partition table scan begin\n");
+	for (i = 0; i < host->n_ports; i++) {
+		struct ata_port *ap = host->ports[i];
+
+		ata_scsi_scan_host(ap, 1);
+	}
+	DPRINTK("partition table scan end\n");
+#endif
 
 	return 0;
 }

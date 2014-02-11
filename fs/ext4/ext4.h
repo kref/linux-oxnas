@@ -1644,6 +1644,7 @@ struct ext4_group_info {
 	unsigned short  bb_first_free;
 	unsigned short  bb_free;
 	unsigned short  bb_fragments;
+	ext4_grpblk_t	bb_largest_free_order;/* order of largest frag in BG */
 	struct          list_head bb_prealloc_list;
 #ifdef DOUBLE_CHECK
 	void            *bb_bitmap;
@@ -1750,11 +1751,18 @@ extern int ext4_get_blocks(handle_t *handle, struct inode *inode,
 			   struct buffer_head *bh, int flags);
 extern int ext4_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 			__u64 start, __u64 len);
+extern int ext4_get_extents(struct inode *inode, loff_t size);
+extern int ext4_setsize(struct inode* inode, loff_t size);
+extern int ext4_getbmapx(struct inode *inode, struct getbmapx *bmx);
+
+extern int ext4_preallocate(struct file *filp, loff_t offset, loff_t len);
+extern int ext4_unpreallocate(struct file *filp, loff_t offset, loff_t len);
+extern int ext4_resetpreallocate(struct file *filp, loff_t offset, loff_t len);
+
 /* move_extent.c */
 extern int ext4_move_extents(struct file *o_filp, struct file *d_filp,
 			     __u64 start_orig, __u64 start_donor,
 			     __u64 len, __u64 *moved_len);
-
 
 /*
  * Add new method to test wether block and inode bitmaps are properly

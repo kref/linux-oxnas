@@ -297,6 +297,18 @@ static int fat_sanitize_mode(const struct msdos_sb_info *sbi,
 
 	perm = *mode_ptr & ~(S_IFMT | mask);
 
+	/* fat does not support usual permissions so if changing to writeable
+         * user all must follow.
+	*/
+	if ( (perm & S_IWUGO) != (inode->i_mode & S_IWUGO))
+	{ /* Propagate the user w bit to all */
+		if (perm & S_IWUSR)
+			perm |= S_IWUGO;
+		else 
+			perm &= ~S_IWUGO;
+	}
+;
+
 	/*
 	 * Of the r and x bits, all (subject to umask) must be present. Of the
 	 * w bits, either all (subject to umask) or none must be present.
@@ -314,6 +326,7 @@ static int fat_sanitize_mode(const struct msdos_sb_info *sbi,
 	}
 
 	*mode_ptr &= S_IFMT | perm;
+
 
 	return 0;
 }
@@ -343,6 +356,7 @@ int fat_setattr(struct dentry *dentry, struct iattr *attr)
 	struct inode *inode = dentry->d_inode;
 	unsigned int ia_valid;
 	int error;
+
 
 	/*
 	 * Expand the file. Since inode_setattr() updates ->i_size
@@ -386,7 +400,6 @@ int fat_setattr(struct dentry *dentry, struct iattr *attr)
 			error = 0;
 		goto out;
 	}
-
 	/*
 	 * We don't return -EPERM here. Yes, strange, but this is too
 	 * old behavior.
@@ -395,6 +408,7 @@ int fat_setattr(struct dentry *dentry, struct iattr *attr)
 		if (fat_sanitize_mode(sbi, inode, &attr->ia_mode) < 0)
 			attr->ia_valid &= ~ATTR_MODE;
 	}
+
 
 	if (attr->ia_valid)
 		error = inode_setattr(inode, attr);

@@ -106,6 +106,9 @@ struct stack {
 	u32 irq[3];
 	u32 abt[3];
 	u32 und[3];
+#if defined(CONFIG_ARCH_OX820) && defined(CONFIG_SMP)
+	u32 fiq[128];
+#endif
 } ____cacheline_aligned;
 
 static struct stack stacks[NR_CPUS];
@@ -329,6 +332,7 @@ void cpu_init(void)
 	/*
 	 * setup stacks for re-entrant exception handlers
 	 */
+#if !defined(CONFIG_ARCH_OX820) || !defined(CONFIG_SMP)
 	__asm__ (
 	"msr	cpsr_c, %1\n\t"
 	"add	sp, %0, %2\n\t"
@@ -347,6 +351,31 @@ void cpu_init(void)
 	      "I" (offsetof(struct stack, und[0])),
 	      "I" (PSR_F_BIT | PSR_I_BIT | SVC_MODE)
 	    : "r14");
+#else
+    /* Same as the uniprocessor stacks, but with a FIQ stack added.*/
+	__asm__ (
+	"msr	cpsr_c, %1\n\t"
+	"add	sp, %0, %2\n\t"
+	"msr	cpsr_c, %3\n\t"
+	"add	sp, %0, %4\n\t"
+	"msr	cpsr_c, %5\n\t"
+	"add	sp, %0, %6\n\t"
+	"msr	cpsr_c, %7\n\t"
+	"add	sp, %0, %8\n\t"
+	"msr	cpsr_c, %9"
+	    :
+	    : "r" (stk),
+	      "I" (PSR_F_BIT | PSR_I_BIT | IRQ_MODE),
+	      "I" (offsetof(struct stack, irq[0])),
+	      "I" (PSR_F_BIT | PSR_I_BIT | ABT_MODE),
+	      "I" (offsetof(struct stack, abt[0])),
+	      "I" (PSR_F_BIT | PSR_I_BIT | UND_MODE),
+	      "I" (offsetof(struct stack, und[0])),
+	      "I" (PSR_F_BIT | PSR_I_BIT | FIQ_MODE),
+	      "I" (offsetof(struct stack, fiq[120])),
+	      "I" (PSR_F_BIT | PSR_I_BIT | SVC_MODE)
+	    : "r14");
+#endif
 }
 
 static struct machine_desc * __init setup_machine(unsigned int nr)

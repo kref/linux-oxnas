@@ -821,6 +821,11 @@ static int ehci_hub_control (
 		dbg_port (ehci, "GetStatus", wIndex + 1, temp);
 		put_unaligned_le32(status, buf);
 		break;
+#ifdef CONFIG_USB_EHCI_ROOT_HUB_TT
+        case ResetHubTT :
+                *((u32 *) ((u32)ehci->regs +TT_STATUS)) = 2;
+                break;
+#endif                
 	case SetHubFeature:
 		switch (wValue) {
 		case C_HUB_LOCAL_POWER:

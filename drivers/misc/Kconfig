@@ -236,5 +236,6 @@ config ISL29003
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
+source "drivers/misc/iscsitarget/Kconfig"
 
 endif # MISC_DEVICES

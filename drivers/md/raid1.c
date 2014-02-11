@@ -37,6 +37,9 @@
 #include "md.h"
 #include "raid1.h"
 #include "bitmap.h"
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
+#include "hwraid.h"
+#endif
 
 #define DEBUG 0
 #if DEBUG
@@ -53,8 +56,8 @@
 
 static void unplug_slaves(mddev_t *mddev);
 
-static void allow_barrier(conf_t *conf);
-static void lower_barrier(conf_t *conf);
+void raid1_allow_barrier(conf_t *conf);
+void raid1_lower_barrier(conf_t *conf);
 
 static void * r1bio_pool_alloc(gfp_t gfp_flags, void *data)
 {
@@ -188,7 +191,7 @@ static void free_r1bio(r1bio_t *r1_bio)
 	 * Wake up any possible resync thread that waits for the device
 	 * to go idle.
 	 */
-	allow_barrier(conf);
+	raid1_allow_barrier(conf);
 
 	put_all_bios(conf, r1_bio);
 	mempool_free(r1_bio, conf->r1bio_pool);
@@ -207,7 +210,7 @@ static void put_buf(r1bio_t *r1_bio)
 
 	mempool_free(r1_bio, conf->r1buf_pool);
 
-	lower_barrier(conf);
+	raid1_lower_barrier(conf);
 }
 
 static void reschedule_retry(r1bio_t *r1_bio)
@@ -568,6 +571,18 @@ static void raid1_unplug(struct request_queue *q)
 
 	unplug_slaves(mddev);
 	md_wakeup_thread(mddev->thread);
+	
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID
+	/* added to get the waiting request queue to re-examine the barrier */
+    if (mddev->hw_raid &&
+        blk_queue_stopped(q) )
+    {
+        unsigned long flags;
+        spin_lock_irqsave(q->queue_lock, flags);
+        blk_start_queue(q);
+        spin_unlock_irqrestore(q->queue_lock, flags);
+    }
+#endif
 }
 
 static int raid1_congested(void *data, int bits)
@@ -643,14 +658,14 @@ static int flush_pending_writes(conf_t *conf)
  *
  * So: regular IO calls 'wait_barrier'.  When that returns there
  *    is no backgroup IO happening,  It must arrange to call
- *    allow_barrier when it has finished its IO.
- * backgroup IO calls must call raise_barrier.  Once that returns
+ *    raid1_allow_barrier when it has finished its IO.
+ * backgroup IO calls must call raid1_raise_barrier.  Once that returns
  *    there is no normal IO happeing.  It must arrange to call
- *    lower_barrier when the particular background IO completes.
+ *    raid1_lower_barrier when the particular background IO completes.
  */
 #define RESYNC_DEPTH 32
 
-static void raise_barrier(conf_t *conf)
+void raid1_raise_barrier(conf_t *conf)
 {
 	spin_lock_irq(&conf->resync_lock);
 
@@ -671,16 +686,28 @@ static void raise_barrier(conf_t *conf)
 	spin_unlock_irq(&conf->resync_lock);
 }
 
-static void lower_barrier(conf_t *conf)
+void raid1_lower_barrier(conf_t *conf)
 {
 	unsigned long flags;
 	spin_lock_irqsave(&conf->resync_lock, flags);
 	conf->barrier--;
 	spin_unlock_irqrestore(&conf->resync_lock, flags);
 	wake_up(&conf->wait_barrier);
+	
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID
+	/* added to get the waiting request queue to re-examine the barrier */
+    if (conf->mddev->hw_raid &&
+        blk_queue_stopped(conf->mddev->queue)) 
+    {
+        unsigned long flags;
+        spin_lock_irqsave(conf->mddev->queue->queue_lock, flags);
+        blk_start_queue(conf->mddev->queue);
+        spin_unlock_irqrestore(conf->mddev->queue->queue_lock, flags);
+    }
+#endif
 }
 
-static void wait_barrier(conf_t *conf)
+void raid1_wait_barrier(conf_t *conf)
 {
 	spin_lock_irq(&conf->resync_lock);
 	if (conf->barrier) {
@@ -694,7 +721,7 @@ static void wait_barrier(conf_t *conf)
 	spin_unlock_irq(&conf->resync_lock);
 }
 
-static void allow_barrier(conf_t *conf)
+void raid1_allow_barrier(conf_t *conf)
 {
 	unsigned long flags;
 	spin_lock_irqsave(&conf->resync_lock, flags);
@@ -706,7 +733,7 @@ static void allow_barrier(conf_t *conf)
 static void freeze_array(conf_t *conf)
 {
 	/* stop syncio and normal IO and wait for everything to
-	 * go quite.
+	 * go quiet.
 	 * We increment barrier and nr_waiting, and then
 	 * wait until nr_pending match nr_queued+1
 	 * This is called in the context of one normal IO request
@@ -804,7 +831,7 @@ static int make_request(struct request_queue *q, struct bio * bio)
 		return 0;
 	}
 
-	wait_barrier(conf);
+	raid1_wait_barrier(conf);
 
 	bitmap = mddev->bitmap;
 
@@ -902,9 +929,9 @@ static int make_request(struct request_queue *q, struct bio * bio)
 			if (r1_bio->bios[j])
 				rdev_dec_pending(conf->mirrors[j].rdev, mddev);
 
-		allow_barrier(conf);
+		raid1_allow_barrier(conf);
 		md_wait_for_blocked_rdev(blocked_rdev, mddev);
-		wait_barrier(conf);
+		raid1_wait_barrier(conf);
 		goto retry_write;
 	}
 
@@ -1045,6 +1072,12 @@ static void error(mddev_t *mddev, mdk_rdev_t *rdev)
 	printk(KERN_ALERT "raid1: Disk failure on %s, disabling device.\n"
 		"raid1: Operation continuing on %d devices.\n",
 		bdevname(rdev->bdev,b), conf->raid_disks - mddev->degraded);
+	
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
+	if (mddev->hw_raid) {
+	    hwraid1_error(mddev, rdev);
+	}
+#endif	
 }
 
 static void print_conf(conf_t *conf)
@@ -1074,8 +1107,8 @@ static void print_conf(conf_t *conf)
 
 static void close_sync(conf_t *conf)
 {
-	wait_barrier(conf);
-	allow_barrier(conf);
+	raid1_wait_barrier(conf);
+	raid1_allow_barrier(conf);
 
 	mempool_destroy(conf->r1buf_pool);
 	conf->r1buf_pool = NULL;
@@ -1144,8 +1177,16 @@ static int raid1_add_disk(mddev_t *mddev, mdk_rdev_t *rdev)
 			rcu_assign_pointer(p->rdev, rdev);
 			break;
 		}
+
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
+	/* if hardware raid is involved, we need to notify it of the new disk */
+	if (!err && mddev->hw_raid) {
+	    err = hwraid1_add_disk(mddev, rdev);
+	}
+#endif	
 	md_integrity_add_rdev(rdev, mddev);
 	print_conf(conf);
+
 	return err;
 }
 
@@ -1154,9 +1195,18 @@ static int raid1_remove_disk(mddev_t *mddev, int number)
 	conf_t *conf = mddev->private;
 	int err = 0;
 	mdk_rdev_t *rdev;
-	mirror_info_t *p = conf->mirrors+ number;
+	mirror_info_t *p = conf->mirrors + number;
 
 	print_conf(conf);
+	
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
+	if (mddev->hw_raid && hwraid_stop_new_commands() ) {
+	    printk(KERN_INFO"HW-RAID1: waiting for hwraid to go idle before removing disk\n");
+        err = -EBUSY;
+        goto abort;
+	}
+#endif
+
 	rdev = p->rdev;
 	if (rdev) {
 		if (test_bit(In_sync, &rdev->flags) ||
@@ -1174,16 +1224,21 @@ static int raid1_remove_disk(mddev_t *mddev, int number)
 		}
 		p->rdev = NULL;
 		synchronize_rcu();
-		if (atomic_read(&rdev->nr_pending)) {
+        if (atomic_read(&rdev->nr_pending)) {
 			/* lost the race, try later */
 			err = -EBUSY;
 			p->rdev = rdev;
 			goto abort;
-		}
+        }
 		md_integrity_register(mddev);
-	}
-abort:
 
+	}
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
+    if (mddev->hw_raid) {
+        err = hwraid1_remove_disk(mddev, number, rdev);
+    }
+#endif	
+abort:
 	print_conf(conf);
 	return err;
 }
@@ -1708,7 +1763,7 @@ static int init_resync(conf_t *conf)
  * that can be installed to exclude normal IO requests.
  */
 
-static sector_t sync_request(mddev_t *mddev, sector_t sector_nr, int *skipped, int go_faster)
+static sector_t _sync_request(mddev_t *mddev, sector_t sector_nr, int *skipped, int go_faster)
 {
 	conf_t *conf = mddev->private;
 	r1bio_t *r1_bio;
@@ -1773,157 +1828,169 @@ static sector_t sync_request(mddev_t *mddev, sector_t sector_nr, int *skipped, i
 		msleep_interruptible(1000);
 
 	bitmap_cond_end_sync(mddev->bitmap, sector_nr);
-	raise_barrier(conf);
+	raid1_raise_barrier(conf);
+	
+    conf->next_resync = sector_nr;
+  
+    r1_bio = mempool_alloc(conf->r1buf_pool, GFP_NOIO);
+    rcu_read_lock();
+    /*
+     * If we get a correctably read error during resync or recovery,
+     * we might want to read from a different device.  So we
+     * flag all drives that could conceivably be read from for READ,
+     * and any others (which will be non-In_sync devices) for WRITE.
+     * If a read fails, we try reading from something else for which READ
+     * is OK.
+     */
 
-	conf->next_resync = sector_nr;
+    r1_bio->mddev = mddev;
+    r1_bio->sector = sector_nr;
+    r1_bio->state = 0;
+    set_bit(R1BIO_IsSync, &r1_bio->state);
 
-	r1_bio = mempool_alloc(conf->r1buf_pool, GFP_NOIO);
-	rcu_read_lock();
-	/*
-	 * If we get a correctably read error during resync or recovery,
-	 * we might want to read from a different device.  So we
-	 * flag all drives that could conceivably be read from for READ,
-	 * and any others (which will be non-In_sync devices) for WRITE.
-	 * If a read fails, we try reading from something else for which READ
-	 * is OK.
-	 */
+    for (i=0; i < conf->raid_disks; i++) {
+        mdk_rdev_t *rdev;
+        bio = r1_bio->bios[i];
 
-	r1_bio->mddev = mddev;
-	r1_bio->sector = sector_nr;
-	r1_bio->state = 0;
-	set_bit(R1BIO_IsSync, &r1_bio->state);
+        /* take from bio_init */
+        bio->bi_next = NULL;
+        bio->bi_flags |= 1 << BIO_UPTODATE;
+        bio->bi_rw = READ;
+        bio->bi_vcnt = 0;
+        bio->bi_idx = 0;
+        bio->bi_phys_segments = 0;
+        bio->bi_size = 0;
+        bio->bi_end_io = NULL;
+        bio->bi_private = NULL;
 
-	for (i=0; i < conf->raid_disks; i++) {
-		mdk_rdev_t *rdev;
-		bio = r1_bio->bios[i];
+        rdev = rcu_dereference(conf->mirrors[i].rdev);
+        if (rdev == NULL ||
+               test_bit(Faulty, &rdev->flags)) {
+            still_degraded = 1;
+            continue;
+        } else if (!test_bit(In_sync, &rdev->flags)) {
+            bio->bi_rw = WRITE;
+            bio->bi_end_io = end_sync_write;
+            write_targets ++;
+        } else {
+            /* may need to read from here */
+            bio->bi_rw = READ;
+            bio->bi_end_io = end_sync_read;
+            if (test_bit(WriteMostly, &rdev->flags)) {
+                if (wonly < 0)
+                    wonly = i;
+            } else {
+                if (disk < 0)
+                    disk = i;
+            }
+            read_targets++;
+        }
+        atomic_inc(&rdev->nr_pending);
+        bio->bi_sector = sector_nr + rdev->data_offset;
+        bio->bi_bdev = rdev->bdev;
+        bio->bi_private = r1_bio;
+    }
+    rcu_read_unlock();
+    if (disk < 0)
+        disk = wonly;
+    r1_bio->read_disk = disk;
 
-		/* take from bio_init */
-		bio->bi_next = NULL;
-		bio->bi_flags |= 1 << BIO_UPTODATE;
-		bio->bi_rw = READ;
-		bio->bi_vcnt = 0;
-		bio->bi_idx = 0;
-		bio->bi_phys_segments = 0;
-		bio->bi_size = 0;
-		bio->bi_end_io = NULL;
-		bio->bi_private = NULL;
+    if (test_bit(MD_RECOVERY_SYNC, &mddev->recovery) && read_targets > 0)
+        /* extra read targets are also write targets */
+        write_targets += read_targets-1;
 
-		rdev = rcu_dereference(conf->mirrors[i].rdev);
-		if (rdev == NULL ||
-			   test_bit(Faulty, &rdev->flags)) {
-			still_degraded = 1;
-			continue;
-		} else if (!test_bit(In_sync, &rdev->flags)) {
-			bio->bi_rw = WRITE;
-			bio->bi_end_io = end_sync_write;
-			write_targets ++;
-		} else {
-			/* may need to read from here */
-			bio->bi_rw = READ;
-			bio->bi_end_io = end_sync_read;
-			if (test_bit(WriteMostly, &rdev->flags)) {
-				if (wonly < 0)
-					wonly = i;
-			} else {
-				if (disk < 0)
-					disk = i;
-			}
-			read_targets++;
-		}
-		atomic_inc(&rdev->nr_pending);
-		bio->bi_sector = sector_nr + rdev->data_offset;
-		bio->bi_bdev = rdev->bdev;
-		bio->bi_private = r1_bio;
-	}
-	rcu_read_unlock();
-	if (disk < 0)
-		disk = wonly;
-	r1_bio->read_disk = disk;
+    if (write_targets == 0 || read_targets == 0) {
+        /* There is nowhere to write, so all non-sync
+         * drives must be failed - so we are finished
+         */
+        sector_t rv = max_sector - sector_nr;
+        *skipped = 1;
+        put_buf(r1_bio);
+        return rv;
+    }
 
-	if (test_bit(MD_RECOVERY_SYNC, &mddev->recovery) && read_targets > 0)
-		/* extra read targets are also write targets */
-		write_targets += read_targets-1;
+    if (max_sector > mddev->resync_max)
+        max_sector = mddev->resync_max; /* Don't do IO beyond here */
+    nr_sectors = 0;
+    sync_blocks = 0;
+    do {
+        struct page *page;
+        int len = PAGE_SIZE;
+        if (sector_nr + (len>>9) > max_sector)
+            len = (max_sector - sector_nr) << 9;
+        if (len == 0)
+            break;
+        if (sync_blocks == 0) {
+            if (!bitmap_start_sync(mddev->bitmap, sector_nr,
+                           &sync_blocks, still_degraded) &&
+                !conf->fullsync &&
+                !test_bit(MD_RECOVERY_REQUESTED, &mddev->recovery))
+                break;
+            BUG_ON(sync_blocks < (PAGE_SIZE>>9));
+            if (len > (sync_blocks<<9))
+                len = sync_blocks<<9;
+        }
 
-	if (write_targets == 0 || read_targets == 0) {
-		/* There is nowhere to write, so all non-sync
-		 * drives must be failed - so we are finished
-		 */
-		sector_t rv = max_sector - sector_nr;
-		*skipped = 1;
-		put_buf(r1_bio);
-		return rv;
-	}
-
-	if (max_sector > mddev->resync_max)
-		max_sector = mddev->resync_max; /* Don't do IO beyond here */
-	nr_sectors = 0;
-	sync_blocks = 0;
-	do {
-		struct page *page;
-		int len = PAGE_SIZE;
-		if (sector_nr + (len>>9) > max_sector)
-			len = (max_sector - sector_nr) << 9;
-		if (len == 0)
-			break;
-		if (sync_blocks == 0) {
-			if (!bitmap_start_sync(mddev->bitmap, sector_nr,
-					       &sync_blocks, still_degraded) &&
-			    !conf->fullsync &&
-			    !test_bit(MD_RECOVERY_REQUESTED, &mddev->recovery))
-				break;
-			BUG_ON(sync_blocks < (PAGE_SIZE>>9));
-			if (len > (sync_blocks<<9))
-				len = sync_blocks<<9;
-		}
-
-		for (i=0 ; i < conf->raid_disks; i++) {
-			bio = r1_bio->bios[i];
-			if (bio->bi_end_io) {
-				page = bio->bi_io_vec[bio->bi_vcnt].bv_page;
-				if (bio_add_page(bio, page, len, 0) == 0) {
-					/* stop here */
-					bio->bi_io_vec[bio->bi_vcnt].bv_page = page;
-					while (i > 0) {
-						i--;
-						bio = r1_bio->bios[i];
-						if (bio->bi_end_io==NULL)
-							continue;
-						/* remove last page from this bio */
-						bio->bi_vcnt--;
-						bio->bi_size -= len;
-						bio->bi_flags &= ~(1<< BIO_SEG_VALID);
-					}
-					goto bio_full;
-				}
-			}
-		}
-		nr_sectors += len>>9;
-		sector_nr += len>>9;
-		sync_blocks -= (len>>9);
-	} while (r1_bio->bios[disk]->bi_vcnt < RESYNC_PAGES);
+        for (i=0 ; i < conf->raid_disks; i++) {
+            bio = r1_bio->bios[i];
+            if (bio->bi_end_io) {
+                page = bio->bi_io_vec[bio->bi_vcnt].bv_page;
+                if (bio_add_page(bio, page, len, 0) == 0) {
+                    /* stop here */
+                    bio->bi_io_vec[bio->bi_vcnt].bv_page = page;
+                    while (i > 0) {
+                        i--;
+                        bio = r1_bio->bios[i];
+                        if (bio->bi_end_io==NULL)
+                            continue;
+                        /* remove last page from this bio */
+                        bio->bi_vcnt--;
+                        bio->bi_size -= len;
+                        bio->bi_flags &= ~(1<< BIO_SEG_VALID);
+                    }
+                    goto bio_full;
+                }
+            }
+        }
+        nr_sectors += len>>9;
+        sector_nr += len>>9;
+        sync_blocks -= (len>>9);
+    } while (r1_bio->bios[disk]->bi_vcnt < RESYNC_PAGES);
  bio_full:
-	r1_bio->sectors = nr_sectors;
+    r1_bio->sectors = nr_sectors;
 
-	/* For a user-requested sync, we read all readable devices and do a
-	 * compare
-	 */
-	if (test_bit(MD_RECOVERY_REQUESTED, &mddev->recovery)) {
-		atomic_set(&r1_bio->remaining, read_targets);
-		for (i=0; i<conf->raid_disks; i++) {
-			bio = r1_bio->bios[i];
-			if (bio->bi_end_io == end_sync_read) {
-				md_sync_acct(bio->bi_bdev, nr_sectors);
-				generic_make_request(bio);
-			}
-		}
-	} else {
-		atomic_set(&r1_bio->remaining, 1);
-		bio = r1_bio->bios[r1_bio->read_disk];
-		md_sync_acct(bio->bi_bdev, nr_sectors);
-		generic_make_request(bio);
+    /* For a user-requested sync, we read all readable devices and do a
+     * compare
+     */
+    if (test_bit(MD_RECOVERY_REQUESTED, &mddev->recovery)) {
+        atomic_set(&r1_bio->remaining, read_targets);
+        for (i=0; i<conf->raid_disks; i++) {
+            bio = r1_bio->bios[i];
+            if (bio->bi_end_io == end_sync_read) {
+                md_sync_acct(bio->bi_bdev, nr_sectors);
+                generic_make_request(bio);
+            }
+        }
+    } else {
+        atomic_set(&r1_bio->remaining, 1);
+        bio = r1_bio->bios[r1_bio->read_disk];
+        md_sync_acct(bio->bi_bdev, nr_sectors);
+        generic_make_request(bio);
 
-	}
+    }
+	
 	return nr_sectors;
+}
+
+static sector_t 
+sync_request(mddev_t *mddev, sector_t sector_nr, int *skipped, int go_faster)
+{
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID
+    if (mddev->hw_raid) {
+        return hwraid1_sync_request(mddev, sector_nr, skipped, go_faster);
+    }
+#endif
+    return _sync_request(mddev, sector_nr, skipped, go_faster);
 }
 
 static sector_t raid1_size(mddev_t *mddev, sector_t sectors, int raid_disks)
@@ -2072,6 +2139,13 @@ static int run(mddev_t *mddev)
 	mddev->queue->backing_dev_info.congested_fn = raid1_congested;
 	mddev->queue->backing_dev_info.congested_data = mddev;
 	md_integrity_register(mddev);
+	
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
+	/* potentially involve this with hardware raid */
+	if (hwraid1_run(mddev, conf) < 0 ) {
+	    printk(KERN_ERR"Unable to use HW RAID accelleration.");
+	}
+#endif	
 	return 0;
 
 out_no_mem:
@@ -2107,12 +2181,20 @@ static int stop(mddev_t *mddev)
 		/* need to kick something here to make sure I/O goes? */
 	}
 
-	raise_barrier(conf);
-	lower_barrier(conf);
+	raid1_raise_barrier(conf);
+	raid1_lower_barrier(conf);
 
 	md_unregister_thread(mddev->thread);
 	mddev->thread = NULL;
-	blk_sync_queue(mddev->queue); /* the unplug fn references 'conf'*/
+
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
+	if (mddev->hw_raid) {
+	    hwraid1_stop(mddev);
+	} else
+#endif	    
+	{
+	    blk_sync_queue(mddev->queue); /* the unplug fn references 'conf'*/
+	}
 	if (conf->r1bio_pool)
 		mempool_destroy(conf->r1bio_pool);
 	kfree(conf->mirrors);
@@ -2144,6 +2226,7 @@ static int raid1_resize(mddev_t *mddev, sector_t sectors)
 	}
 	mddev->dev_sectors = sectors;
 	mddev->resync_max_sectors = sectors;
+	
 	return 0;
 }
 
@@ -2212,9 +2295,14 @@ static int raid1_reshape(mddev_t *mddev)
 		return -ENOMEM;
 	}
 
-	raise_barrier(conf);
+	raid1_raise_barrier(conf);
 
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
 	/* ok, everything is stopped */
+	if (mddev->hw_raid) {
+	    hwraid1_reshape_begin(mddev);
+	}
+#endif	
 	oldpool = conf->r1bio_pool;
 	conf->r1bio_pool = newpool;
 
@@ -2249,7 +2337,14 @@ static int raid1_reshape(mddev_t *mddev)
 	mddev->delta_disks = 0;
 
 	conf->last_used = 0; /* just make sure it is in-range */
-	lower_barrier(conf);
+	
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID                        
+	/* ok, everything is stopped */
+	if (mddev->hw_raid) {
+	    hwraid1_reshape_end(mddev);
+	}
+#endif	
+	raid1_lower_barrier(conf);
 
 	set_bit(MD_RECOVERY_NEEDED, &mddev->recovery);
 	md_wakeup_thread(mddev->thread);
@@ -2264,10 +2359,10 @@ static void raid1_quiesce(mddev_t *mddev, int state)
 
 	switch(state) {
 	case 1:
-		raise_barrier(conf);
+		raid1_raise_barrier(conf);
 		break;
 	case 0:
-		lower_barrier(conf);
+		raid1_lower_barrier(conf);
 		break;
 	}
 }

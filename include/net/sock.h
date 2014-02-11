@@ -504,6 +504,7 @@ enum sock_flags {
 	SOCK_TIMESTAMPING_SOFTWARE,     /* %SOF_TIMESTAMPING_SOFTWARE */
 	SOCK_TIMESTAMPING_RAW_HARDWARE, /* %SOF_TIMESTAMPING_RAW_HARDWARE */
 	SOCK_TIMESTAMPING_SYS_HARDWARE, /* %SOF_TIMESTAMPING_SYS_HARDWARE */
+	SOCK_ZCC,
 };
 
 static inline void sock_copy_flags(struct sock *nsk, struct sock *osk)
@@ -645,6 +646,8 @@ struct proto {
 					size_t len, int noblock, int flags, 
 					int *addr_len);
 	int			(*sendpage)(struct sock *sk, struct page *page,
+					int offset, size_t size, int flags);
+	int			(*sendpages)(struct sock *sk, struct page **page,
 					int offset, size_t size, int flags);
 	int			(*bind)(struct sock *sk, 
 					struct sockaddr *uaddr, int addr_len);
@@ -926,11 +929,41 @@ static inline void lock_sock(struct sock *sk)
 extern void release_sock(struct sock *sk);
 
 /* BH context may only use the following locking interface. */
-#define bh_lock_sock(__sk)	spin_lock(&((__sk)->sk_lock.slock))
-#define bh_lock_sock_nested(__sk) \
-				spin_lock_nested(&((__sk)->sk_lock.slock), \
-				SINGLE_DEPTH_NESTING)
-#define bh_unlock_sock(__sk)	spin_unlock(&((__sk)->sk_lock.slock))
+#define bh_lock_sock(_sk) do { \
+	if (unlikely(!spin_trylock(&(_sk)->sk_lock.slock))) { \
+		unsigned long end = jiffies + HZ; \
+		do { \
+			if (time_after(jiffies, end)) { \
+				printk(KERN_WARNING "bh_lock_wsock() A second has elapsed " \
+					"while waiting for spinlock\n"); \
+				end = jiffies + HZ; \
+			} \
+		} while (unlikely(!spin_trylock(&(_sk)->sk_lock.slock))); \
+	} \
+} while(0)
+
+#define bh_lock_sock_nested(_sk) bh_lock_sock(_sk)
+
+#define bh_unlock_sock(_sk) spin_unlock(&(_sk)->sk_lock.slock)
+
+#define wspin_lock_bh(_lock) do { \
+	if (unlikely(!spin_trylock_bh((_lock)))) { \
+		unsigned long end = jiffies + HZ; \
+		do { \
+			if (time_after(jiffies, end)) { \
+				printk(KERN_WARNING "wspin_lock_bh() A second has elapsed " \
+					"while waiting for spinlock\n"); \
+				end = jiffies + HZ; \
+			} \
+		} while (unlikely(!spin_trylock_bh((_lock)))); \
+	} \
+} while(0)
+
+#define wspin_unlock_bh(_lock) spin_unlock_bh((_lock))
+
+#define wspin_unlock(_lock) spin_unlock((_lock))
+
+#define wspin_trylock(_lock) spin_trylock((_lock))
 
 extern struct sock		*sk_alloc(struct net *net, int family,
 					  gfp_t priority,

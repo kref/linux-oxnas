@@ -182,9 +182,10 @@ unsigned int usb_stor_access_xfer_buf(unsigned char *buffer,
 					PAGE_SIZE - poff);
 			unsigned char *ptr = kmap(page);
 
-			if (dir == TO_XFER_BUF)
+			if (dir == TO_XFER_BUF) {
 				memcpy(ptr + poff, buffer + cnt, plen);
-			else
+				flush_dcache_page(page);
+			} else
 				memcpy(buffer + cnt, ptr + poff, plen);
 			kunmap(page);
 

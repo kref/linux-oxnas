@@ -225,8 +225,8 @@ static int tick_check_new_device(struct clock_event_device *newdev)
 		 * If the cpu affinity of the device interrupt can not
 		 * be set, ignore it.
 		 */
-		if (!irq_can_set_affinity(newdev->irq))
-			goto out_bc;
+//		if (!irq_can_set_affinity(newdev->irq))
+//			goto out_bc;
 
 		/*
 		 * If we have a cpu local device already, do not replace it

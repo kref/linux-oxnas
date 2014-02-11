@@ -926,13 +926,37 @@ xfs_fs_alloc_inode(
  */
 STATIC void
 xfs_fs_destroy_inode(
-	struct inode	*inode)
+	struct inode		*inode)
 {
-	xfs_inode_t		*ip = XFS_I(inode);
+	struct xfs_inode	*ip = XFS_I(inode);
+
+	xfs_itrace_entry(ip);
 
 	XFS_STATS_INC(vn_reclaim);
-	if (xfs_reclaim(ip))
-		panic("%s: cannot reclaim 0x%p\n", __func__, inode);
+
+	/* bad inode, get out here ASAP */
+	if (is_bad_inode(inode))
+		goto out_reclaim;
+
+	xfs_ioend_wait(ip);
+
+	ASSERT(XFS_FORCED_SHUTDOWN(ip->i_mount) || ip->i_delayed_blks == 0);
+
+	/*
+	 * We should never get here with one of the reclaim flags already set.
+	 */
+	ASSERT_ALWAYS(!xfs_iflags_test(ip, XFS_IRECLAIMABLE));
+	ASSERT_ALWAYS(!xfs_iflags_test(ip, XFS_IRECLAIM));
+
+	/*
+	 * we always use background reclaim here because even if the
+	 * inode is clean, it still may be under IO and hence we have
+	 * to take the flush lock. The background reclaim path handles
+	 * this more efficiently than we can here, so simply let background
+	 * reclaim tear down all inodes.
+	 */
+out_reclaim:
+	xfs_inode_set_reclaim_tag(ip);
 }
 
 /*

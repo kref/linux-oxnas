@@ -1,0 +1,21 @@
+#
+# iscsi target driver configuration
+#
+
+config ISCSI_TARGET
+	tristate "iSCSI Enterprise Target"
+	default n
+	select CRYPTO
+	select CRYPTO_HASH
+	select CRYPTO_CRC32C
+	select CRYPTO_MD5
+	---help---
+	  Say Y here if you want to export devices to iSCSI initiators.
+
+	  This option is the kernel part of the iET package version 1.4.20.2
+	  (see http://iscsitarget.sourceforge.net/). It depends on 'CRYPTO' 
+	  support being enabled, and within the cryptographic API, the CRC32C
+	  and MD5 modules also being enabled.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called iscsi_trgt

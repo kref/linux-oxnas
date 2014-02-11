@@ -264,6 +264,7 @@
 #include <linux/cache.h>
 #include <linux/err.h>
 #include <linux/crypto.h>
+#include <linux/pagemap.h>
 
 #include <net/icmp.h>
 #include <net/tcp.h>
@@ -274,6 +275,8 @@
 
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
+
+#include <mach/oxnas_net.h>
 
 int sysctl_tcp_fin_timeout __read_mostly = TCP_FIN_TIMEOUT;
 
@@ -735,6 +738,12 @@ static ssize_t do_tcp_sendpages(struct sock *sk, struct page **pages, int poffse
 		int size = min_t(size_t, psize, PAGE_SIZE - offset);
 
 		if (!tcp_send_head(sk) || (copy = size_goal - skb->len) <= 0) {
+// Seems to be a little slower if we do this
+// /* Push any skb languishing at the head of the send queue */
+// if (tcp_send_head(sk) && (skb == tcp_send_head(sk))) {
+// 	tcp_push_one(sk, mss_now);
+// }
+
 new_segment:
 			if (!sk_stream_memory_free(sk))
 				goto wait_for_sndbuf;
@@ -790,8 +799,7 @@ new_segment:
 		if (forced_push(tp)) {
 			tcp_mark_push(tp, skb);
 			__tcp_push_pending_frames(sk, mss_now, TCP_NAGLE_PUSH);
-		} else if (skb == tcp_send_head(sk))
-			tcp_push_one(sk, mss_now);
+		}
 		continue;
 
 wait_for_sndbuf:
@@ -834,6 +842,48 @@ ssize_t tcp_sendpage(struct socket *sock, struct page *page, int offset,
 	TCP_CHECK_TIMER(sk);
 	release_sock(sk);
 	return res;
+}
+
+ssize_t tcp_sendpages(struct socket *sock, struct page **page, int offset,
+ 		     size_t size, int flags)
+{
+ 	ssize_t res;
+ 	struct sock *sk = sock->sk;
+ 
+#define TCP_ZC_CSUM_FLAGS (NETIF_F_IP_CSUM | NETIF_F_NO_CSUM | NETIF_F_HW_CSUM)
+
+	if (!(sk->sk_route_caps & NETIF_F_SG) ||
+	    !(sk->sk_route_caps & TCP_ZC_CSUM_FLAGS)) {
+        // Iterate through each page
+        ssize_t ret = 0;
+
+        while (size) {
+            unsigned long psize = PAGE_CACHE_SIZE - offset;
+            struct page *page_it;
+        
+            psize = PAGE_CACHE_SIZE - offset;
+            if (size <= psize) {
+                psize = size;                
+            }
+            page_it = *page;
+            ret += sock_no_sendpage(sock, page_it, offset, psize, flags);
+            size -= psize;            
+            page++;
+            offset += psize;
+            offset &= (PAGE_CACHE_SIZE - 1);
+        }
+		return ret;        
+    }
+    
+#undef TCP_ZC_CSUM_FLAGS
+
+ 	lock_sock(sk);
+ 	TCP_CHECK_TIMER(sk);
+ 	res = do_tcp_sendpages(sk, page, offset, size, flags);
+ 	TCP_CHECK_TIMER(sk);
+     
+ 	release_sock(sk);
+ 	return res;
 }
 
 #define TCP_PAGE(sk)	(sk->sk_sndmsg_page)
@@ -1206,8 +1256,13 @@ static void tcp_prequeue_process(struct sock *sk)
 	/* RX process wants to run with disabled BHs, though it is not
 	 * necessary */
 	local_bh_disable();
-	while ((skb = __skb_dequeue(&tp->ucopy.prequeue)) != NULL)
+	while ((skb = __skb_dequeue(&tp->ucopy.prequeue)) != NULL) {
+		if (skb->zcc) {
+//printk("tcp_prequeue_process() Setting SOCK_ZCC\n");
+			sock_set_flag(sk, SOCK_ZCC);
+		}
 		sk_backlog_rcv(sk, skb);
+	}
 	local_bh_enable();
 
 	/* Clear memory counter. */
@@ -1390,6 +1445,14 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		/* Next get a buffer. */
 
 		skb_queue_walk(&sk->sk_receive_queue, skb) {
+			/* skb is from a zero copy capable interface. Should only need to
+			   set the socket flag as every skb from a particular interface
+			   should have the same value zero copy capability */
+			if (skb->zcc) {
+//printk("tcp_recvmsg() Setting SOCK_ZCC\n");
+				sock_set_flag(sk, SOCK_ZCC);
+			}
+
 			/* Now that we have two receive queues this
 			 * shouldn't happen.
 			 */
@@ -2938,6 +3001,378 @@ void __init tcp_init(void)
 
 	tcp_register_congestion_control(&tcp_reno);
 }
+
+/**
+ * @param char*   ptr        To be set to point to the start of the contiguous
+ *                           data received from the socket
+ * @param size_t  len        The number of received bytes required on input and
+ *                           the number of available contiguous received bytes
+ *                           on output
+ * @param size_t  preadvance The number of bytes to advance the socket receive
+ *                           stream prior to returning the ptr/len pair
+ *                           describing the available contiguous received bytes
+ * @return int               Zero on success, otherwise -error_code
+ *
+ * The final preadvance and cleaning up of the network receive stack can be done
+ * by setting cleanup to non-zero. In this case the 'len' argument should
+ * contain the total number of bytes that have been read from the stream so that
+ * cleanup on the stream can be performed
+ *
+ * Locking of the socket must be performed by the caller
+ */
+int oxnas_net_get_bytes(oxnas_net_get_bytes_args_t *args)
+{
+	u32              seq;
+	int              ret = 0;
+	u32              offset = args->cached_offset;
+	struct sk_buff  *skb = args->cached_skb;
+	struct sock     *sk = args->sk;
+	struct tcp_sock *tp = tcp_sk(sk);
+	size_t           preadvance = args->preadvance;
+
+WARN_ON(!skb_queue_empty(&tp->ucopy.prequeue));
+
+	/* Do we need to account for data consumed from the receive stream by a
+	   previous call to this function? */
+	if (preadvance) {
+//printk("Preadvance of %d\n", preadvance);
+		/* Use the current stream position to get the skb to be affected by the
+		   preadvance */
+		seq = tp->copied_seq;
+		if (skb == NULL) {
+			skb = tcp_recv_skb(sk, seq, &offset);
+		}
+
+		/* If we're asked to preadvance the stream pointer that should mean we
+		   had previously said there was sufficient available contiguous data */
+		BUG_ON(skb == NULL);
+
+		/* Doesn't make sense to be returned a skb that's already fully consumed */
+		BUG_ON(offset > skb->len);
+
+		/* Preadvance must not move beyond the data immediately available from
+		   the stream, as it should have been a result of a previous request
+		   for available contiguous stream data */
+		offset += preadvance;
+		BUG_ON(offset > skb->len);
+
+		/* If the preadvance exhausts the current skb's capacity then free it */
+		if (offset == skb->len) {
+			if (tcp_hdr(skb)->fin) {
+//printk("Eating skb %p due to fin\n", skb);
+				sk_eat_skb(sk, skb, 0);
+				++seq;
+			} else {
+//printk("Eating skb %p\n", skb);
+				sk_eat_skb(sk, skb, 0);
+			}
+			skb = NULL;
+			offset = 0;
+		}
+
+		/* Advance the stream position to account for the consumed data */
+		seq += preadvance;
+		tp->copied_seq = seq;
+
+		/* We've performed the requested pre-advance */
+		args->preadvance = 0;
+//printk("Finished preadvance of %d\n", preadvance);
+	}
+
+	if (unlikely(args->cleanup)) {
+		/* Cleanup the stream now that the current batch of writes has finished */
+		tcp_rcv_space_adjust(sk);
+		tcp_cleanup_rbuf(sk, args->len);
+	} else {
+		/* If we need to get the next skb */
+		if (skb == NULL) {
+			long timeo = sock_rcvtimeo(sk, 0);
+
+			seq = tp->copied_seq;
+			for (;;) {
+				if (unlikely(sk->sk_state == TCP_LISTEN)) {
+//printk("oxnas_net_get_bytes() TCP_LISTEN -> ENOTCONN\n");
+					ret = -ENOTCONN;
+					break;
+				}
+
+				skb = tcp_recv_skb(sk, seq, &offset);
+				if (skb) {
+					break;
+				}
+
+				/* Check for the socket having become unusable */
+				if (unlikely(sock_flag(sk, SOCK_DONE))) {
+//printk("oxnas_net_get_bytes() SOCK_DONE\n");
+					break;
+				}
+				if (unlikely(sk->sk_err)) {
+					ret = sock_error(sk);
+//printk("oxnas_net_get_bytes() sk_err = %d\n", ret);
+					break;
+				}
+				if (unlikely(sk->sk_shutdown & RCV_SHUTDOWN)) {
+//printk("oxnas_net_get_bytes() sk_shutdown\n");
+					break;
+				}
+				if (unlikely(sk->sk_state == TCP_CLOSE)) {
+//printk("oxnas_net_get_bytes() TCP_CLOSE\n");
+					if (!sock_flag(sk, SOCK_DONE)) {
+//printk("oxnas_net_get_bytes() TCP_CLOSE & !SOCK_DONE -> ENOTCONN\n");
+						ret = -ENOTCONN;
+					}
+					break;
+				}
+
+				if (unlikely(!timeo)) {
+//printk("oxnas_net_get_bytes() timeout == 0 -> EAGAIN\n");
+					ret = -EAGAIN;
+					break;
+				}
+
+				/* No skb available just now, so wait for one to turn up */
+				sk_wait_data(sk, &timeo);
+				if (unlikely(signal_pending(current))) {
+					ret = sock_intr_errno(timeo);
+//printk("oxnas_net_get_bytes() signal_pending -> ret = %d\n", ret);
+					break;
+				}
+			}
+		}
+
+		if (!skb) {
+			args->len = 0;
+		} else {
+			size_t head_len;
+			size_t available = 0;
+			struct skb_shared_info *shinfo = skb_shinfo(skb);
+
+			/* Sanity check the skb */
+			BUG_ON(skb_shinfo(skb)->frag_list);
+			BUG_ON(offset > skb->len);
+
+			head_len = skb->len - skb->data_len;
+
+			if (offset < head_len) {
+				args->ptr = skb->data + offset;
+				available = head_len - offset;
+			} else {
+				/* Could perhaps speed up fragment processing by returning
+				 * cached fragment index and offset to caller, but not expecting
+				 * fragments to be present much when this call is made
+				 */
+				int i;
+				u32 local_offset = offset - head_len;
+
+				for (i=0; i < shinfo->nr_frags; i++) {
+					skb_frag_t *frag = &shinfo->frags[i];
+
+					if (local_offset < frag->size) {
+						args->ptr = page_address(frag->page) + frag->page_offset + local_offset;
+						available = frag->size - local_offset;
+						break;
+					}
+					local_offset -= frag->size;
+				}
+			}
+
+			/* Limit returned length to maximum requested */
+			if (available < args->len) {
+				args->len = available;
+			}
+
+			/* Remember how far the stream needs advancing before the next read */
+			args->preadvance = args->len;
+		}
+	}
+
+	/* Pass latest SKB info back to caller */
+	args->cached_offset = offset;
+	args->cached_skb = skb;
+
+	return ret;
+}
+EXPORT_SYMBOL(oxnas_net_get_bytes);
+
+#ifdef CONFIG_OXNAS_ZERO_COPY_RX_SUPPORT
+ssize_t oxnas_net_read_sock(
+	struct sock			 *sk,
+	read_descriptor_t	 *desc,
+	oxnas_net_rx_actor_t  actor,
+	int					  block,
+	size_t               *bytes_read)
+{
+	struct tcp_sock *tp;
+	u32 seq;
+	int retval = 0;
+	size_t copied = 0;
+	size_t dodgy_skip_len = 0;
+
+	/* Check contract */
+	BUG_ON(!sk);
+	BUG_ON(!desc);
+	BUG_ON(!actor);
+
+	lock_sock(sk);
+
+	tp = tcp_sk(sk);
+	seq = tp->copied_seq;
+
+WARN_ON(!skb_queue_empty(&tp->ucopy.prequeue));
+
+	/* Keep trying to receive data until the user's request is satisfied */
+	for (;;) {
+		struct sk_buff *skb;
+		u32 offset;
+		int frags_full = 0;
+		long timeo = sock_rcvtimeo(sk, !block);
+
+		for (;;) {
+			if (unlikely(sk->sk_state == TCP_LISTEN)) {
+//printk("oxnas_net_read_sock() TCP_LISTEN -> ENOTCONN\n");
+				retval = -ENOTCONN;
+				goto finished;
+			}
+
+			skb = tcp_recv_skb(sk, seq, &offset);
+			if (skb) {
+				if (unlikely(is_dodgy_packet(skb))) {
+
+					print_dodgy_packet(skb);
+
+					/* Try to get the stream to discard the entire dodgy packet */
+					dodgy_skip_len = skb->len - offset;
+printk("oxnas_net_read_sock() Dodgy packet offset %d -> dodgy_skip_len %d\n", offset, dodgy_skip_len);
+
+					seq    += dodgy_skip_len;
+					copied += dodgy_skip_len;
+
+					if (tcp_hdr(skb)->fin) {
+						sk_eat_skb(sk, skb, 0);
+						++seq;
+					} else {
+						sk_eat_skb(sk, skb, 0);
+					}
+					goto finished;
+				}
+
+				break;
+			}
+
+			/* Don't wait for another skb to arrive if we already have data that
+			   could be returned to the caller */
+			if (copied > 0) goto finished;
+
+			/* Caller has requested that we shouldn't wait if data isn't
+			   immediately available */
+			if (!block) goto finished;
+
+			/* Check for the socket having become unusable */
+			if (unlikely(sock_flag(sk, SOCK_DONE))) {
+//printk("oxnas_net_read_sock() SOCK_DONE\n");
+				goto finished;
+			}
+			if (unlikely(sk->sk_err)) {
+				retval = sock_error(sk);
+//printk("oxnas_net_read_sock() sk_err = %d\n", ret);
+				goto finished;
+			}
+			if (unlikely(sk->sk_shutdown & RCV_SHUTDOWN)) {
+//printk("oxnas_net_read_sock() sk_shutdown\n");
+				goto finished;
+			}
+			if (unlikely(sk->sk_state == TCP_CLOSE)) {
+//printk("oxnas_net_read_sock() TCP_CLOSE\n");
+				if (!sock_flag(sk, SOCK_DONE)) {
+//printk("oxnas_net_read_sock() TCP_CLOSE & !SOCK_DONE -> ENOTCONN\n");
+					retval = -ENOTCONN;
+				}
+				goto finished;
+			}
+
+			if (unlikely(!timeo)) {
+//printk("oxnas_net_read_sock() timeout == 0 -> EAGAIN\n");
+				retval = -EAGAIN;
+				goto finished;
+			}
+
+			/* No skb available just now, so wait for one to turn up */
+			sk_wait_data(sk, &timeo);
+			if (unlikely(signal_pending(current))) {
+				retval = sock_intr_errno(timeo);
+//printk("oxnas_net_read_sock() signal_pending -> ret = %d\n", ret);
+				goto finished;
+			}
+		}
+
+		if (offset < skb->len) {
+			size_t required, avail, used;
+
+			/* How much data is available in the skb? */
+			avail = skb->len - offset;
+
+			/* Stop reading if we hit a patch of urgent data */
+			if (tp->urg_data) {
+				u32 urg_offset = tp->urg_seq - seq;
+				if (urg_offset < avail) {
+					avail = urg_offset;
+				}
+
+				if (!avail) {
+					break;
+				}
+			}
+
+			/* Gather data ready for transfer to output device */
+			required = desc->count;
+
+			frags_full = actor(desc, skb, offset);
+			used = required - desc->count;
+
+			/* Update record of where we are in the input stream */
+			seq    += used;
+			offset += used;
+
+			/* Update record of how much data the actor has consumed */
+			copied += used;
+
+			/* If didn't gather all data in skb we must have finished */
+			if (offset != skb->len) {
+				break;
+			}
+		}
+
+		/* All data in skb used, so release it */
+		if (tcp_hdr(skb)->fin) {
+			sk_eat_skb(sk, skb, 0);
+			++seq;
+			break;
+		}
+		sk_eat_skb(sk, skb, 0);
+
+		/* If the actor has gathered all the data requested or fragment storage
+		   was exhausted then finish */
+		if (!desc->count || frags_full) {
+			break;
+		}
+	}
+
+finished:
+	tp->copied_seq = seq;
+
+	tcp_rcv_space_adjust(sk);
+
+	if (copied > 0) {
+		tcp_cleanup_rbuf(sk, copied);
+	}
+	release_sock(sk);
+
+	*bytes_read = copied - dodgy_skip_len;
+
+	return retval;
+}
+EXPORT_SYMBOL(oxnas_net_read_sock);
+#endif // CONFIG_OXNAS_ZERO_COPY_RX_SUPPORT
 
 EXPORT_SYMBOL(tcp_close);
 EXPORT_SYMBOL(tcp_disconnect);

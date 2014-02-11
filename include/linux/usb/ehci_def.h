@@ -92,14 +92,22 @@ struct ehci_regs {
 	/* ASYNCLISTADDR: offset 0x18 */
 	u32		async_next;	/* address of next async queue head */
 
-	u32		reserved [9];
+	u32 ttctrl;
+	u32 burstsize;
+	u32 txfilltuning;
+	u32 txttfilltuning;
+	u32 reserved_1;
+	u32 ulpi_viewport;
+	u32 reserved_2;
+	u32 endpknack;
+	u32 endptnalek;
 
 	/* CONFIGFLAG: offset 0x40 */
 	u32		configured_flag;
 #define FLAG_CF		(1<<0)		/* true: we'll support "high speed" */
 
 	/* PORTSC: offset 0x44 */
-	u32		port_status [0];	/* up to N_PORTS */
+	u32		port_status [8];	/* up to N_PORTS, max 8 */
 /* 31:23 reserved */
 #define PORT_WKOC_E	(1<<22)		/* wake on overcurrent (enable) */
 #define PORT_WKDISC_E	(1<<21)		/* wake on disconnect (enable) */
@@ -124,13 +132,21 @@ struct ehci_regs {
 #define PORT_CSC	(1<<1)		/* connect status change */
 #define PORT_CONNECT	(1<<0)		/* device connected */
 #define PORT_RWC_BITS   (PORT_CSC | PORT_PEC | PORT_OCC)
-} __attribute__ ((packed));
 
-#define USBMODE		0x68		/* USB Device mode */
+	u32 otgsc;
+	u32 usbmode;
 #define USBMODE_SDIS	(1<<3)		/* Stream disable */
 #define USBMODE_BE	(1<<2)		/* BE/LE endianness select */
 #define USBMODE_CM_HC	(3<<0)		/* host controller mode */
 #define USBMODE_CM_IDLE	(0<<0)		/* idle state */
+
+	u32 endptsetupstack;
+	u32 endptprime;
+	u32 endptflush;
+	u32 endptstat;
+	u32 endptcomplete;
+	u32 endptctrl[8];
+} __attribute__ ((packed));
 
 /* Appendix C, Debug port ... intended for use with special "debug devices"
  * that can help if there's no serial console.  (nonstandard enumeration.)

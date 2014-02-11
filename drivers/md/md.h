@@ -26,6 +26,8 @@
 
 #define MaxSector (~(sector_t)0)
 
+struct raidset_s; 
+
 typedef struct mddev_s mddev_t;
 typedef struct mdk_rdev_s mdk_rdev_t;
 
@@ -292,6 +294,9 @@ struct mddev_s
 	struct mutex			bitmap_mutex;
 
 	struct list_head		all_mddevs;
+#ifdef CONFIG_SATA_OX820_DIRECT_HWRAID
+	struct raidset_s* hw_raid;
+#endif
 };
 
 

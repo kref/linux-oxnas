@@ -68,13 +68,22 @@ static void put_compound_page(struct page *page)
 		(*dtor)(page);
 	}
 }
-
+	
 void put_page(struct page *page)
 {
-	if (unlikely(PageCompound(page)))
-		put_compound_page(page);
-	else if (put_page_testzero(page))
-		__page_cache_release(page);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+	if (PageIncoherentSendfile(page)) {
+		fast_put(page);
+	} else {
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+		if (unlikely(PageCompound(page))) {
+			put_compound_page(page);
+		} else if (put_page_testzero(page)) {
+			__page_cache_release(page);
+		}
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+	}
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 }
 EXPORT_SYMBOL(put_page);
 
@@ -335,6 +344,9 @@ void release_pages(struct page **pages, int nr, int cold)
 	for (i = 0; i < nr; i++) {
 		struct page *page = pages[i];
 
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		WARN_ON(PageIncoherentSendfile(page));
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		if (unlikely(PageCompound(page))) {
 			if (zone) {
 				spin_unlock_irqrestore(&zone->lru_lock, flags);

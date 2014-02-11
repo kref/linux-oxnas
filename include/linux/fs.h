@@ -557,7 +557,7 @@ typedef struct {
 	int error;
 } read_descriptor_t;
 
-typedef int (*read_actor_t)(read_descriptor_t *, struct page *,
+typedef int (*read_actor_t)(read_descriptor_t *, struct page **,
 		unsigned long, unsigned long);
 
 struct address_space_operations {
@@ -713,6 +713,7 @@ static inline int mapping_writably_mapped(struct address_space *mapping)
 struct posix_acl;
 #define ACL_NOT_CACHED ((void *)(-1))
 
+#include <mach/filemap_info.h>
 struct inode {
 	struct hlist_node	i_hash;
 	struct list_head	i_list;
@@ -781,7 +782,66 @@ struct inode {
 	struct posix_acl	*i_default_acl;
 #endif
 	void			*i_private; /* fs or device private pointer */
+	
+	int 			space_reserve:1,
+					truncate_space_reset:1,
+					do_space_reserve:1,
+					prealloc_initialised:1;
+	loff_t 			prealloc_size;
+
+	struct semaphore writer_sem;
+	int        		 normal_open_count;
+
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+	int                   close_in_progress;
+	wait_queue_head_t     close_wait_queue;
+	spinlock_t 		      fast_lock;
+	int			          fast_open_count;
+	struct list_head      fast_files;
+	rwlock_t              fast_files_lock;
+	struct semaphore      reader_sem;
+	oxnas_filemap_info_t  filemap_info;
+	wait_queue_head_t     fallback_wait_queue;
+	int                   fast_reads_in_progress_count;
+	wait_queue_head_t     filemap_wait_queue;
+	int                   fallback_in_progress:1,
+#ifdef CONFIG_OXNAS_FAST_WRITES
+                          writer_filemap_locked:1,
+                          writer_filemap_dirty:1,
+#endif //CONFIG_OXNAS_FAST_WRITES
+						  filemap_locked:1,
+						  filemap_update_pending:1;
+#ifdef CONFIG_OXNAS_FAST_WRITES
+	int                   fast_writes_in_progress_count;
+	int 				  write_error;
+	oxnas_filemap_info_t  writer_filemap_info;
+	void 				 *writer_file_context;
+	void                 *filemap_locker_uid;
+	loff_t 				  i_tent_size;
+#endif //CONFIG_OXNAS_FAST_WRITES
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
+#ifdef CONFIG_OXNAS_BACKUP
+	int	backup_open_count;
+#endif // CONFIG_OXNAS_BACKUP
 };
+
+#ifdef CONFIG_OXNAS_FAST_WRITES
+static inline void set_write_error(struct inode *inode)
+{
+	inode->write_error = 1;
+}
+
+static inline void clear_write_error(struct inode *inode)
+{
+	inode->write_error = 0;
+}
+
+static inline int check_write_error(struct inode *inode)
+{
+	return inode->write_error;
+}
+#endif
 
 /*
  * inode->i_mutex nesting subclasses for the lock validator:
@@ -939,6 +999,24 @@ struct file {
 #ifdef CONFIG_DEBUG_WRITECOUNT
 	unsigned long f_mnt_write_state;
 #endif
+
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+	struct inode     *inode;
+	struct list_head  fast_head;
+	void             *fast_context;
+#ifdef CONFIG_OXNAS_FAST_WRITES
+	void             *fast_write_context;
+#endif //CONFIG_OXNAS_FAST_WRITES
+#else // CONFIG_OXNAS_FAST_READS_AND_WRITES
+#ifdef CONFIG_OXNAS_BACKUP
+	struct inode     *inode;
+#endif // CONFIG_OXNAS_BACKUP
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
+#ifdef CONFIG_OXNAS_BACKUP
+	void             *backup_context;
+#endif //CONFIG_OXNAS_BACKUP
+
 };
 extern spinlock_t files_lock;
 #define file_list_lock() spin_lock(&files_lock);
@@ -1490,6 +1568,7 @@ struct file_operations {
 	ssize_t (*write) (struct file *, const char __user *, size_t, loff_t *);
 	ssize_t (*aio_read) (struct kiocb *, const struct iovec *, unsigned long, loff_t);
 	ssize_t (*aio_write) (struct kiocb *, const struct iovec *, unsigned long, loff_t);
+	ssize_t (*aio_direct_netrx_write) (struct kiocb *, void* callback, void *sock);
 	int (*readdir) (struct file *, void *, filldir_t);
 	unsigned int (*poll) (struct file *, struct poll_table_struct *);
 	int (*ioctl) (struct inode *, struct file *, unsigned int, unsigned long);
@@ -1503,14 +1582,22 @@ struct file_operations {
 	int (*aio_fsync) (struct kiocb *, int datasync);
 	int (*fasync) (int, struct file *, int);
 	int (*lock) (struct file *, int, struct file_lock *);
+	ssize_t (*sendfile) (struct file *, loff_t *, size_t, read_actor_t, void *);
+	ssize_t (*incoherent_sendfile) (struct file *, loff_t *, size_t, read_actor_t, void *);
 	ssize_t (*sendpage) (struct file *, struct page *, int, size_t, loff_t *, int);
+	ssize_t (*sendpages) (struct file *, struct page **, int, size_t, loff_t *, int);
 	unsigned long (*get_unmapped_area)(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
 	int (*check_flags)(int);
 	int (*flock) (struct file *, int, struct file_lock *);
 	ssize_t (*splice_write)(struct pipe_inode_info *, struct file *, loff_t *, size_t, unsigned int);
 	ssize_t (*splice_read)(struct file *, loff_t *, struct pipe_inode_info *, size_t, unsigned int);
 	int (*setlease)(struct file *, long, struct file_lock **);
+	int (*preallocate)(struct file *, loff_t, loff_t);
+	int (*unpreallocate)(struct file *, loff_t, loff_t);
+	int (*resetpreallocate)(struct file *, loff_t, loff_t);
 };
+
+struct getbmapx;
 
 struct inode_operations {
 	int (*create) (struct inode *,struct dentry *,int, struct nameidata *);
@@ -1539,6 +1626,9 @@ struct inode_operations {
 			  loff_t len);
 	int (*fiemap)(struct inode *, struct fiemap_extent_info *, u64 start,
 		      u64 len);
+	int (*get_extents)(struct inode *inode, loff_t size);
+	int (*getbmapx)(struct inode *inode, struct getbmapx *bmx);
+	int (*setsize)(struct inode *, loff_t);
 };
 
 struct seq_file;
@@ -2190,7 +2280,8 @@ extern int sb_has_dirty_inodes(struct super_block *);
 
 extern int generic_file_mmap(struct file *, struct vm_area_struct *);
 extern int generic_file_readonly_mmap(struct file *, struct vm_area_struct *);
-extern int file_read_actor(read_descriptor_t * desc, struct page *page, unsigned long offset, unsigned long size);
+extern int file_read_actor(read_descriptor_t * desc, struct page **page, unsigned long offset, unsigned long size);
+extern int file_send_actor(read_descriptor_t * desc, struct page **page, unsigned long offset, unsigned long size);
 int generic_write_checks(struct file *file, loff_t *pos, size_t *count, int isblk);
 extern ssize_t generic_file_aio_read(struct kiocb *, const struct iovec *, unsigned long, loff_t);
 extern ssize_t generic_file_aio_write(struct kiocb *, const struct iovec *, unsigned long, loff_t);
@@ -2202,6 +2293,8 @@ extern ssize_t generic_file_buffered_write(struct kiocb *, const struct iovec *,
 		unsigned long, loff_t, loff_t *, size_t, ssize_t);
 extern ssize_t do_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos);
 extern ssize_t do_sync_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos);
+extern ssize_t generic_file_sendfile(struct file *, loff_t *, size_t, read_actor_t, void *);
+extern ssize_t generic_file_incoherent_sendfile(struct file *, loff_t *, size_t, read_actor_t, void *);
 extern int generic_segment_checks(const struct iovec *iov,
 		unsigned long *nr_segs, size_t *count, int access_flags);
 

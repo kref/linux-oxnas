@@ -780,6 +780,8 @@ struct ata_port_operations {
 	void (*qc_prep)(struct ata_queued_cmd *qc);
 	unsigned int (*qc_issue)(struct ata_queued_cmd *qc);
 	bool (*qc_fill_rtf)(struct ata_queued_cmd *qc);
+	int (*qc_new)(struct ata_port *ap);
+	void (*qc_free)(struct ata_queued_cmd *qc);
 
 	/*
 	 * Configuration and exception handling
@@ -861,6 +863,8 @@ struct ata_port_operations {
 	 */
 	void (*phy_reset)(struct ata_port *ap);
 	void (*eng_timeout)(struct ata_port *ap);
+
+	int (*acquire_hw)(int port_no, int may_sleep, int timeout_jiffies);
 
 	/*
 	 * ->inherits must be the last field and all the preceding

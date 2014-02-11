@@ -19,6 +19,9 @@ obj-$(CONFIG_SATA_INIC162X)	+= sata_inic162x.o
 obj-$(CONFIG_PDC_ADMA)		+= pdc_adma.o
 obj-$(CONFIG_SATA_FSL)		+= sata_fsl.o
 
+obj-$(CONFIG_SATA_OX820)	+= ox820sata.o
+obj-$(CONFIG_SATA_OX820_DIRECT_SINGLE)	+= ox820direct-storage.o
+
 obj-$(CONFIG_PATA_ALI)		+= pata_ali.o
 obj-$(CONFIG_PATA_AMD)		+= pata_amd.o
 obj-$(CONFIG_PATA_ARTOP)	+= pata_artop.o

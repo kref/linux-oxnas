@@ -5308,6 +5308,9 @@ pick_next_task(struct rq *rq)
 		 * returns a non-NULL p:
 		 */
 		class = class->next;
+		if (unlikely(!class)) {
+			printk("pick_next_task() NULL class\n");
+		}
 	}
 }
 

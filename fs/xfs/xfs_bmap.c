@@ -6606,3 +6606,187 @@ xfs_bmap_disk_count_leaves(
 		*count += xfs_bmbt_disk_get_blockcount(frp);
 	}
 }
+
+int								/* error code */
+xfs_k_getbmap(
+	xfs_inode_t		*ip,
+	struct getbmap	*bmv,		/* user bmap structure */
+	struct getbmapx	*bmx,		/* pointer to user's array */
+	int              interface)	/* interface flags */
+{
+	__int64_t		 bmvend;	/* last block requested */
+	int				 error;		/* return value */
+	__int64_t		 fixlen;	/* length for -1 case */
+	int				 i;			/* extent number */
+	int				 lock;		/* lock state */
+	xfs_bmbt_irec_t	*map;		/* buffer for user's data */
+	xfs_mount_t		*mp;		/* file system mount point */
+	int				 nex;		/* # of user extents can do */
+	int				 nexleft;	/* # of user extents left */
+	int				 subnex;	/* # of bmapi's can do */
+	int				 nmap;		/* number of map entries */
+	int				 whichfork;	/* data or attr fork */
+	int				 prealloced;/* this is a file with preallocated data space */
+	int				 iflags;	/* interface flags */
+	int				 bmapi_flags;/* flags for xfs_bmapi */
+
+	mp = ip->i_mount;
+	iflags = interface;
+
+	BUG_ON(interface & BMV_IF_ATTRFORK);
+
+	whichfork = XFS_DATA_FORK;
+
+	/*
+	 * If the BMV_IF_NO_DMAPI_READ interface bit specified, do
+	 * not generate a DMAPI read event.  Otherwise, if the
+	 * DM_EVENT_READ bit is set for the file, generate a read
+	 * event in order that the DMAPI application may do its thing
+	 * before we return the extents.  Usually this means restoring
+	 * user file data to regions of the file that look like holes.
+	 *
+	 * The "old behavior" (from XFS_IOC_GETBMAP) is to not specify
+	 * BMV_IF_NO_DMAPI_READ so that read events are generated.
+	 * If this were not true, callers of ioctl(XFS_IOC_GETBMAP)
+	 * could misinterpret holes in a DMAPI file as true holes,
+	 * when in fact they may represent offline user data.
+	 */
+	if (DM_EVENT_ENABLED(ip, DM_EVENT_READ) &&
+		!(iflags & BMV_IF_NO_DMAPI_READ)) {
+		error = XFS_SEND_DATA(mp, DM_EVENT_READ, ip,
+					  0, 0, 0, NULL);
+		if (error)
+			return XFS_ERROR(error);
+	}
+
+	if (ip->i_d.di_format != XFS_DINODE_FMT_EXTENTS &&
+		ip->i_d.di_format != XFS_DINODE_FMT_BTREE &&
+		ip->i_d.di_format != XFS_DINODE_FMT_LOCAL)
+		return XFS_ERROR(EINVAL);
+
+	if (xfs_get_extsz_hint(ip) ||
+		ip->i_d.di_flags & (XFS_DIFLAG_PREALLOC|XFS_DIFLAG_APPEND)){
+		prealloced = 1;
+		fixlen = XFS_MAXIOFFSET(mp);
+	} else {
+		prealloced = 0;
+		fixlen = ip->i_size;
+	}
+
+	if (bmv->bmv_length == -1) {
+		fixlen = XFS_FSB_TO_BB(mp, XFS_B_TO_FSB(mp, fixlen));
+		bmv->bmv_length =
+			max_t(__int64_t, fixlen - bmv->bmv_offset, 0);
+	} else if (bmv->bmv_length == 0) {
+		bmv->bmv_entries = 0;
+		return 0;
+	} else if (bmv->bmv_length < 0) {
+		return XFS_ERROR(EINVAL);
+	}
+
+	nex = bmv->bmv_count - 1;
+	if (nex <= 0)
+		return XFS_ERROR(EINVAL);
+	bmvend = bmv->bmv_offset + bmv->bmv_length;
+
+	xfs_ilock(ip, XFS_IOLOCK_SHARED);
+	if (whichfork == XFS_DATA_FORK && !(iflags & BMV_IF_DELALLOC)) {
+		if (ip->i_delayed_blks || ip->i_size > ip->i_d.di_size) {
+			error = xfs_flush_pages(ip, 0, -1, 0, FI_REMAPF);
+			if (error)
+				goto out_unlock_iolock;
+		}
+
+		ASSERT(ip->i_delayed_blks == 0);
+	}
+
+	lock = xfs_ilock_map_shared(ip);
+
+	/*
+	 * Don't let nex be bigger than the number of extents
+	 * we can have assuming alternating holes and real extents.
+	 */
+	if (nex > XFS_IFORK_NEXTENTS(ip, whichfork) * 2 + 1)
+		nex = XFS_IFORK_NEXTENTS(ip, whichfork) * 2 + 1;
+
+	bmapi_flags = xfs_bmapi_aflag(whichfork);
+	if (!(iflags & BMV_IF_PREALLOC))
+		bmapi_flags |= XFS_BMAPI_IGSTATE;
+
+	/*
+	 * Allocate enough space to handle "subnex" maps at a time.
+	 */
+	error = ENOMEM;
+	subnex = 16;
+	map = kmem_alloc(subnex * sizeof(*map), KM_MAYFAIL | KM_NOFS);
+	if (!map)
+		goto out_unlock_ilock;
+
+	bmv->bmv_entries = 0;
+
+	if (XFS_IFORK_NEXTENTS(ip, whichfork) == 0 &&
+	    (whichfork == XFS_ATTR_FORK || !(iflags & BMV_IF_DELALLOC))) {
+		error = 0;
+		goto out_free_map;
+	}
+
+	nexleft = nex;
+
+	do {
+		nmap = (nexleft > subnex) ? subnex : nexleft;
+		error = xfs_bmapi(NULL, ip, XFS_BB_TO_FSBT(mp, bmv->bmv_offset),
+				  XFS_BB_TO_FSB(mp, bmv->bmv_length),
+				  bmapi_flags, NULL, 0, map, &nmap,
+				  NULL, NULL);
+		if (error)
+			goto out_free_map;
+		ASSERT(nmap <= subnex);
+
+		for (i = 0; i < nmap && nexleft && bmv->bmv_length; i++) {
+			bmx->bmv_oflags = 0;
+			if (map[i].br_state == XFS_EXT_UNWRITTEN)
+				bmx->bmv_oflags |= BMV_OF_PREALLOC;
+			else if (map[i].br_startblock == DELAYSTARTBLOCK)
+				bmx->bmv_oflags |= BMV_OF_DELALLOC;
+			bmx->bmv_offset =
+				XFS_FSB_TO_BB(mp, map[i].br_startoff);
+			bmx->bmv_length =
+				XFS_FSB_TO_BB(mp, map[i].br_blockcount);
+			bmx->bmv_unused1 = 0;
+			bmx->bmv_unused2 = 0;
+			ASSERT(((iflags & BMV_IF_DELALLOC) != 0) ||
+			      (map[i].br_startblock != DELAYSTARTBLOCK));
+			if (map[i].br_startblock == HOLESTARTBLOCK &&
+			    whichfork == XFS_ATTR_FORK) {
+				/* came to the end of attribute fork */
+				bmx->bmv_oflags |= BMV_OF_LAST;
+				goto out_free_map;
+			}
+
+			if (!xfs_getbmapx_fix_eof_hole(ip, bmx,
+					prealloced, bmvend,
+					map[i].br_startblock))
+				goto out_free_map;
+
+			nexleft--;
+			bmv->bmv_offset =
+				bmx->bmv_offset +
+				bmx->bmv_length;
+			bmv->bmv_length =
+				max_t(__int64_t, 0, bmvend - bmv->bmv_offset);
+			bmv->bmv_entries++;
+
+			bmx++;
+		}
+	} while (nmap && nexleft && bmv->bmv_length);
+
+out_free_map:
+	kmem_free(map);
+out_unlock_ilock:
+	xfs_iunlock_map_shared(ip, lock);
+out_unlock_iolock:
+	xfs_iunlock(ip, XFS_IOLOCK_SHARED);
+
+	return error;
+}
+

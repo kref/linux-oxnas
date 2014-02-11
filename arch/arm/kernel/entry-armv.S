@@ -1162,19 +1162,46 @@ __stubs_start:
 
 	.align	5
 
-/*=============================================================================
- * Undefined FIQs
- *-----------------------------------------------------------------------------
- * Enter in FIQ mode, spsr = ANY CPSR, lr = ANY PC
- * MUST PRESERVE SVC SPSR, but need to switch to SVC mode to show our msg.
- * Basically to switch modes, we *HAVE* to clobber one register...  brain
- * damage alert!  I don't think that we can execute any code in here in any
- * other mode than FIQ...  Ok you can switch to another mode, but you can't
- * get out of that mode without clobbering one register.
+
+/*
+ * FIQ handler
+ *
+ * This code uses the FIQ stack setup in cpu_init(). It saves r0-r3 and the lr
+ * (the hardware will have put the fiq return address in lr) it then assumes 
+ * that the C code will save any other registers that it uses and that all
+ * that is needed for the C stack, is a stack pointer.
+ *
+ * The stack space is limited to 128 quads, so stack usage needs to be kept 
+ * to a minimum.
+ *
+ * The C code that it calls must not use any locks, or any code that uses the
+ * exclusive access instructions. The un-stoppable monster that the FIQ is
+ * means that it can preempt a LDREX STREX pair even when all reasonable
+ * attempts to stop preemption have been taken. Nesting exclusive accesses
+ * confuses the hardware and breaks spinlocks.
+ *
  */
+    .local __do_coherency
 vector_fiq:
+#if !defined(CONFIG_ARCH_OX820) || !defined(CONFIG_SMP)
 	disable_fiq
-	subs	pc, lr, #4
+    subs	pc, lr, #4
+#else
+    /* save registers and Jump to C code */
+    stmdb   sp!, {r0-r3, lr}
+    adr     r0, __fiq_handler
+    mov     lr, pc
+    ldr     pc, [r0]
+    pop     {r0-r3, lr}
+
+    /* return from interrupt */
+    subs	pc, lr, #4
+    
+__fiq_handler:
+    .long   do_coherency
+#endif
+
+
 
 /*=============================================================================
  * Address exception handler

@@ -194,6 +194,7 @@ static int ip_local_deliver_finish(struct sk_buff *skb)
 	struct net *net = dev_net(skb->dev);
 
 	__skb_pull(skb, ip_hdrlen(skb));
+skb->ip_header_len = ip_hdrlen(skb);
 
 	/* Point into the IP datagram, just past the header. */
 	skb_reset_transport_header(skb);

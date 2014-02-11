@@ -1,0 +1,55 @@
+if ARCH_OX820
+
+menu "Oxford Semiconductor NAS Options"
+
+config ARCH_OXNAS_FPGA
+	bool "FPGA platform"
+	default n
+	help
+	  This enables support for Oxsemi NAS SoC FPGA development platform
+
+choice
+	prompt "OXNAS system type"
+	default OXNAS_VERSION_OX820
+
+config OXNAS_VERSION_OX815
+	bool "OX815"
+	help
+	  Support for the OX815 SoC
+
+config OXNAS_VERSION_OX820
+	bool "OX820"
+	help
+	  Support for the OX820 SoC
+
+config OXNAS_VERSION_OX825
+	bool "OX825"
+	help
+	  Support for the OX825 SoC
+endchoice
+
+config FORCE_MAX_ZONEORDER
+	int "Max order of zoned buddy allocator"
+	default 11
+	help
+		The value to be assigned to MAX_ORDER
+
+config LEDS_TRIGGER_SATA_DISK
+	tristate "Front Panel SATA disk activity lamp"
+	default n
+	help
+		This module controls the SATA disk activity lamp.
+
+config OXNAS_PCIE_RESET_GPIO
+	int "The GPIO line used to reset the PCIe cards"
+	depends on PCI
+	default 44
+	help
+		This line is toggled during PCIe startup and
+		should be wired to the PCIe bus reset to ensure all cards
+		are reset prior to them being configured.
+
+
+endmenu
+
+endif

@@ -13,6 +13,10 @@
 #include <linux/debug_locks.h>
 #include <linux/mm_types.h>
 
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+#include <mach/incoherent_sendfile.h>
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
 struct mempolicy;
 struct anon_vma;
 struct file_ra_state;
@@ -299,9 +303,17 @@ static inline int page_count(struct page *page)
 
 static inline void get_page(struct page *page)
 {
-	page = compound_head(page);
-	VM_BUG_ON(atomic_read(&page->_count) == 0);
-	atomic_inc(&page->_count);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+	if (PageIncoherentSendfile(page)) {
+		fast_get(page);
+	} else {
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+		page = compound_head(page);
+		VM_BUG_ON(atomic_read(&page->_count) == 0);
+		atomic_inc(&page->_count);
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+	}
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 }
 
 static inline struct page *virt_to_head_page(const void *x)

@@ -2464,6 +2464,118 @@ config S6GMAC
 	  To compile this driver as a module, choose M here. The module
 	  will be called s6gmac.
 
+config SYNOPSYS_GMAC
+	tristate "Synopsys Gigabit MAC"
+	select CRC32
+	select MII
+	depends on ARCH_OX820
+	help
+		Driver for the Synopsys Gigabit MAC
+
+config OXNAS_LEON_X2
+	bool "x2 Leon clock"
+	depends on SYNOPSYS_GMAC
+	default y
+
+config OXNAS_IPV6_OFFLOAD
+	bool "IPv6 offload"
+	depends on SYNOPSYS_GMAC
+	default y
+
+config OXNAS_MAX_GMAC_UNITS
+	int "How many Ethernet ports"
+	depends on SYNOPSYS_GMAC
+	default 1 if OXNAS_VERSION_OX815
+	default 1 if OXNAS_VERSION_OX820
+	default 2 if OXNAS_VERSION_OX825
+
+config OXNAS_NAPI_POLL_WEIGHT
+	int "NAPI poll weight for GMAC driver"
+	depends on SYNOPSYS_GMAC
+	default 64
+	help
+			Allow the GMAC driver poll weight to be set
+
+config OXNAS_GMAC_DDR_DESCRIPTORS
+	bool "GMAC DDR Descriptors"
+	depends on SYNOPSYS_GMAC
+	default y
+
+config OXNAS_GMAC_SRAM_TX_DESCRIPTORS
+	bool "GMAC SRAM for Tx descriptors"
+	depends on OXNAS_GMAC_DDR_DESCRIPTORS
+	default n
+	help
+		If set then the Rx descriptors managed by the ARM will be in DDR
+		while Tx descriptors managed by the Leon will be in SRAM
+
+config OXNAS_COPRO_JOB_QUEUE_NUM_ENTRIES
+	int "Number of entries in ARM/Leon Tx offload job queue"
+	default 16 if OXNAS_GMAC_DDR_DESCRIPTORS
+	default 8
+	depends on SYNOPSYS_GMAC
+	depends on SUPPORT_LEON
+	help
+		Can queue this many Tx offload jobs with the Leon
+
+config OXNAS_GMAC_WATCHDOG
+	bool "System watchdog using Leon and GMAC driver"
+	depends on SYNOPSYS_GMAC
+	default n
+
+config ARCH_OXNAS_GMAC1_NUM_RX_DESCRIPTORS
+	int "The number of Rx descriptors to allocate for first GMAC"
+	default 384
+
+config ARCH_OXNAS_GMAC2_NUM_RX_DESCRIPTORS
+	int "The number of Rx descriptors to allocate for second GMAC"
+	default 128 if OXNAS_VERSION_OX825
+	default 0
+
+config ARCH_OXNAS_GMAC1_NUM_TX_DESCRIPTORS
+	int "The number of Tx descriptors to allocate for first GMAC"
+	default 0
+	help
+		Used for allocate space for Tx descriptors managed by the ARM when no
+		copro offload is in use. If may need to switch between copro and ARM
+		Tx at runtime, this value must be defined in order that sufficient
+		Tx descriptors are available for the ARM when copro usage is disabled at
+		runtime
+
+config ARCH_OXNAS_GMAC2_NUM_TX_DESCRIPTORS
+	int "The number of Tx descriptors to allocate for second GMAC"
+	default 128 if OXNAS_VERSION_OX825
+	default 0
+	help
+		Used for allocate space for Tx descriptors managed by the ARM when no
+		copro offload is in use. If may need to switch between copro and ARM
+		Tx at runtime, this value must be defined in order that sufficient
+		Tx descriptors are available for the ARM when copro usage is disabled at
+		runtime
+
+config ARCH_OXNAS_GMAC1_COPRO_NUM_TX_DESCRIPTORS
+	int "The number of CoPro Tx descriptors to allocate for first GMAC"
+	default 128 if OXNAS_GMAC_DDR_DESCRIPTORS
+	default 120
+	help
+		Passed to the copro to tell it how many Tx descriptors it is to manage.
+		When descriptors are in DDR it also defines the size of DMA coherent
+		memory that the ARM should map to hold the CoPro Tx descriptors.
+		If there may be the need to switch between ARM and Copro Tx at runtime
+		then this value must be defined so that when the CoPro is used it knows
+		how many descriptors it is to manage and
+
+config ARCH_OXNAS_GMAC2_COPRO_NUM_TX_DESCRIPTORS
+	int "The number of CoPro Tx descriptors to allocate for second GMAC"
+	default 0
+	help
+		Passed to the copro to tell it how many Tx descriptors it is to manage.
+		When descriptors are in DDR it also defines the size of DMA coherent
+		memory that the ARM should map to hold the CoPro Tx descriptors.
+		If there may be the need to switch between ARM and Copro Tx at runtime
+		then this value must be defined so that when the CoPro is used it knows
+		how many descriptors it is to manage and
+
 endif # NETDEV_1000
 
 #

@@ -646,6 +646,7 @@ static void hub_activate(struct usb_hub *hub, enum hub_activation_type type)
 	int status;
 	bool need_debounce_delay = false;
 	unsigned delay;
+	int start_port;
 
 	/* Continue a partial initialization */
 	if (type == HUB_INIT2)
@@ -688,7 +689,16 @@ static void hub_activate(struct usb_hub *hub, enum hub_activation_type type)
 	/* Check each port and set hub->change_bits to let khubd know
 	 * which ports need attention.
 	 */
-	for (port1 = 1; port1 <= hdev->maxchild; ++port1) {
+#if defined(CONFIG_USB_GADGET_78XX) || defined(CONFIG_USB_GADGET_78XX_MODULE)
+	if (!hdev->parent) {
+//		printk("hub_activate() Excluding first port\n");
+		start_port = 2;
+	} else
+		start_port = 1;
+#else // CONFIG_USB_GADGET_78XX
+	start_port = 1;
+#endif
+	for (port1 = start_port; port1 <= hdev->maxchild; ++port1) {
 		struct usb_device *udev = hdev->children[port1-1];
 		u16 portstatus, portchange;
 
@@ -3069,6 +3079,7 @@ static void hub_events(void)
 	 * Not the most efficient, but avoids deadlocks.
 	 */
 	while (1) {
+		int start_port;
 
 		/* Grab the first entry at the beginning of the list */
 		spin_lock_irq(&hub_event_lock);
@@ -3135,7 +3146,16 @@ static void hub_events(void)
 		}
 
 		/* deal with port status changes */
-		for (i = 1; i <= hub->descriptor->bNbrPorts; i++) {
+#if defined(CONFIG_USB_GADGET_78XX) || defined(CONFIG_USB_GADGET_78XX_MODULE)
+		if (!hub->hdev->parent) {
+//			printk("hub_events() Excluding first port\n");
+			start_port = 2;
+		} else
+			start_port = 1;
+#else // CONFIG_USB_GADGET_78XX
+		start_port = 1;
+#endif
+		for (i = start_port; i <= hub->descriptor->bNbrPorts; i++) {
 			if (test_bit(i, hub->busy_bits))
 				continue;
 			connect_change = test_bit(i, hub->change_bits);

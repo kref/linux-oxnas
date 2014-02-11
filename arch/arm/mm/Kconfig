@@ -391,7 +391,7 @@ config CPU_FEROCEON_OLD_ID
 
 # ARMv6
 config CPU_V6
-	bool "Support ARM V6 processor" if ARCH_INTEGRATOR || MACH_REALVIEW_EB || MACH_REALVIEW_PBX
+	bool "Support ARM V6 processor" if ARCH_INTEGRATOR || MACH_REALVIEW_EB || MACH_REALVIEW_PBX || ARCH_OX820
 	select CPU_32v6
 	select CPU_ABRT_EV6
 	select CPU_PABRT_NOIFAR
@@ -771,3 +771,14 @@ config CACHE_XSC3L2
 	select OUTER_CACHE
 	help
 	  This option enables the L2 cache on XScale3.
+
+config SMP_LAZY_DCACHE_FLUSH
+	bool "SMP lazy data-cache flushing"
+	depends on SMP && ARCH_OX820
+	default y
+	help
+	  Tracks pages that may have dirty data cache lines associated with them
+	  on the basis that that cache flushes needed for a page can be put off 
+	  until a user process maps the page. This is done by default on UP builds
+	  this option enables the inter-processor tracking and communication
+	  required for doing this on SMP builds

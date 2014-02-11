@@ -122,6 +122,7 @@ struct ehci_hcd {			/* one per controller */
 	u32			command;
 
 	/* SILICON QUIRKS */
+	unsigned		is_tdi_rh_tt:1;		/* TDI roothub with TT */
 	unsigned		no_selective_suspend:1;
 	unsigned		has_fsl_port_bug:1; /* FreeScale */
 	unsigned		big_endian_mmio:1;
@@ -558,6 +559,12 @@ ehci_port_speed(struct ehci_hcd *ehci, unsigned int portsc)
 	}
 	return (1<<USB_PORT_FEAT_HIGHSPEED);
 }
+
+#ifdef CONFIG_USB_EHCI_ROOT_HUB_TT
+/* TDI transaction translator status register and busy bit */
+#define TT_BUSY 0x1
+#define TT_STATUS  (0x15c-0x140)
+#endif
 
 #else
 

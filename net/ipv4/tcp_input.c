@@ -4297,6 +4297,15 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 	if (TCP_SKB_CB(skb)->seq == TCP_SKB_CB(skb)->end_seq)
 		goto drop;
 
+if (th->doff * 4 > skb_headlen(skb)) {
+	printk("Offset to TCP data > linear data length, skb=%p, skb->len %u, "
+		"skb->data_len %u, th->doff %u, nr_frags %d, frag[0].len %u\n",
+		skb, skb->len, skb->data_len, th->doff, skb_shinfo(skb)->nr_frags, skb_shinfo(skb)->frags[0].size);
+} else if (th->doff * 4 > skb->len) {
+	printk("Offset to TCP data > total packet length, skb=%p, skb->len %u, "
+		"skb->data_len %u, th->doff %u, nr_frags %d, frag[0].len %u\n",
+		skb, skb->len, skb->data_len, th->doff, skb_shinfo(skb)->nr_frags, skb_shinfo(skb)->frags[0].size);
+}
 	__skb_pull(skb, th->doff * 4);
 
 	TCP_ECN_accept_cwr(tp, skb);
@@ -4534,6 +4543,9 @@ tcp_collapse(struct sock *sk, struct sk_buff_head *list,
 	struct sk_buff *skb, *n;
 	bool end_of_skbs;
 
+//printk(KERN_WARNING "tcp_collapse() Forcing to do nothing\n");
+return;
+
 	/* First, check that queue is collapsible and find
 	 * the point where collapsing can be useful. */
 	skb = head;
@@ -4638,6 +4650,9 @@ static void tcp_collapse_ofo_queue(struct sock *sk)
 	struct sk_buff *skb = skb_peek(&tp->out_of_order_queue);
 	struct sk_buff *head;
 	u32 start, end;
+
+//printk(KERN_WARNING "tcp_collapse_ofo_queue() Forcing to do nothing\n");
+return;
 
 	if (skb == NULL)
 		return;

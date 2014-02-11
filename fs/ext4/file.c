@@ -130,6 +130,92 @@ force_commit:
 	return ret;
 }
 
+extern ssize_t generic_file_direct_netrx_write(
+	struct kiocb *iocb,
+	void         *callback,
+	void         *sock,
+	loff_t        pos,
+	loff_t       *ppos,
+	u32           count,
+	ssize_t       written);
+
+static ssize_t ext4_direct_netrx_write(
+	struct kiocb *iocb,
+	void         *callback,
+	void         *sock)
+{
+	struct file  *file = iocb->ki_filp;
+	struct inode *inode = file->f_path.dentry->d_inode;
+	loff_t       *offset = &iocb->ki_pos;
+	size_t        length = iocb->ki_left;
+	loff_t        pos = *offset;
+	ssize_t       ret;
+	int           err;
+
+	/*
+	 * If we have encountered a bitmap-format file, the size limit
+	 * is smaller than s_maxbytes, which is for extent-mapped files.
+	 */
+	if (!(EXT4_I(inode)->i_flags & EXT4_EXTENTS_FL)) {
+		struct ext4_sb_info *sbi = EXT4_SB(inode->i_sb);
+
+		if (pos > sbi->s_bitmap_maxbytes)
+			return -EFBIG;
+
+		if (pos + length > sbi->s_bitmap_maxbytes) {
+			length = sbi->s_bitmap_maxbytes - pos;
+		}
+	}
+
+	ret = generic_file_direct_netrx_write(iocb, callback, sock, pos, offset, length, 0);
+	/*
+	 * Skip flushing if there was an error, or if nothing was written.
+	 */
+	if (ret <= 0)
+		return ret;
+
+	/*
+	 * If the inode is IS_SYNC, or is O_SYNC and we are doing data
+	 * journalling then we need to make sure that we force the transaction
+	 * to disk to keep all metadata uptodate synchronously.
+	 */
+	if (file->f_flags & O_SYNC) {
+		/*
+		 * If we are non-data-journaled, then the dirty data has
+		 * already been flushed to backing store by generic_osync_inode,
+		 * and the inode has been flushed too if there have been any
+		 * modifications other than mere timestamp updates.
+		 *
+		 * Open question --- do we care about flushing timestamps too
+		 * if the inode is IS_SYNC?
+		 */
+		if (!ext4_should_journal_data(inode))
+			return ret;
+
+		goto force_commit;
+	}
+
+	/*
+	 * So we know that there has been no forced data flush.  If the inode
+	 * is marked IS_SYNC, we need to force one ourselves.
+	 */
+	if (!IS_SYNC(inode))
+		return ret;
+
+	/*
+	 * Open question #2 --- should we force data to disk here too?  If we
+	 * don't, the only impact is that data=writeback filesystems won't
+	 * flush data to disk automatically on IS_SYNC, only metadata (but
+	 * historically, that is what ext2 has done.)
+	 */
+
+force_commit:
+	err = ext4_force_commit(inode->i_sb);
+	if (err)
+		return err;
+	return ret;
+}
+
 static struct vm_operations_struct ext4_file_vm_ops = {
 	.fault		= filemap_fault,
 	.page_mkwrite   = ext4_page_mkwrite,
@@ -185,6 +271,7 @@ const struct file_operations ext4_file_operations = {
 	.write		= do_sync_write,
 	.aio_read	= generic_file_aio_read,
 	.aio_write	= ext4_file_write,
+	.aio_direct_netrx_write = ext4_direct_netrx_write,
 	.unlocked_ioctl = ext4_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= ext4_compat_ioctl,
@@ -195,6 +282,15 @@ const struct file_operations ext4_file_operations = {
 	.fsync		= ext4_sync_file,
 	.splice_read	= generic_file_splice_read,
 	.splice_write	= generic_file_splice_write,
+	.sendfile	   = generic_file_sendfile,
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+	.incoherent_sendfile = generic_file_incoherent_sendfile,
+#else
+	.incoherent_sendfile = generic_file_sendfile,
+#endif
+	.preallocate   = ext4_preallocate,
+	.unpreallocate = ext4_unpreallocate,
+	.resetpreallocate = ext4_resetpreallocate,
 };
 
 const struct inode_operations ext4_file_inode_operations = {
@@ -210,5 +306,8 @@ const struct inode_operations ext4_file_inode_operations = {
 	.permission	= ext4_permission,
 	.fallocate	= ext4_fallocate,
 	.fiemap		= ext4_fiemap,
+	.get_extents = ext4_get_extents,
+	.getbmapx 	= ext4_getbmapx,
+	.setsize    = ext4_setsize,
 };
 

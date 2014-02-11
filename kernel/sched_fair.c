@@ -772,9 +772,9 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int sleep)
 
 	clear_buddies(cfs_rq, se);
 
+	account_entity_dequeue(cfs_rq, se);
 	if (se != cfs_rq->curr)
 		__dequeue_entity(cfs_rq, se);
-	account_entity_dequeue(cfs_rq, se);
 	update_min_vruntime(cfs_rq);
 }
 
@@ -1518,6 +1518,10 @@ static struct task_struct *pick_next_task_fair(struct rq *rq)
 
 	do {
 		se = pick_next_entity(cfs_rq);
+		if (unlikely(!se)) {
+			printk("pick_next_task_fair() NULL se from pick_next_entity()\n");
+			return NULL;
+		}
 		/*
 		 * If se was a buddy, clear it so that it will have to earn
 		 * the favour again.

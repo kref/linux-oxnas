@@ -371,6 +371,13 @@ xfs_getbmap(
 	xfs_bmap_format_t	formatter,	/* format to user */
 	void			*arg);		/* formatter arg */
 
+int								/* error code */
+xfs_k_getbmap(
+	xfs_inode_t		*ip,
+	struct getbmap	*bmv,		/* user bmap structure */
+	struct getbmapx	*bmx,		/* pointer to user's array */
+	int              interface);/* interface flags */
+
 /*
  * Check if the endoff is outside the last extent. If so the caller will grow
  * the allocation to a stripe unit boundary

@@ -38,7 +38,6 @@ int xfs_symlink(struct xfs_inode *dp, struct xfs_name *link_name,
 		const char *target_path, mode_t mode, struct xfs_inode **ipp,
 		cred_t *credp);
 int xfs_set_dmattrs(struct xfs_inode *ip, u_int evmask, u_int16_t state);
-int xfs_reclaim(struct xfs_inode *ip);
 int xfs_change_file_space(struct xfs_inode *ip, int cmd,
 		xfs_flock64_t *bf, xfs_off_t offset, int attr_flags);
 int xfs_rename(struct xfs_inode *src_dp, struct xfs_name *src_name,
@@ -54,6 +53,9 @@ int xfs_attr_list(struct xfs_inode *dp, char *buffer, int bufsize,
 ssize_t xfs_read(struct xfs_inode *ip, struct kiocb *iocb,
 		const struct iovec *iovp, unsigned int segs,
 		loff_t *offset, int ioflags);
+ssize_t xfs_sendfile(struct xfs_inode *ip, struct file *filp, loff_t *ppos,
+		int ioflags, size_t count, read_actor_t actor, void *target,
+		int incoherent);
 ssize_t xfs_splice_read(struct xfs_inode *ip, struct file *infilp,
 		loff_t *ppos, struct pipe_inode_info *pipe, size_t count,
 		int flags, int ioflags);
@@ -63,6 +65,7 @@ ssize_t xfs_splice_write(struct xfs_inode *ip,
 ssize_t xfs_write(struct xfs_inode *xip, struct kiocb *iocb,
 		const struct iovec *iovp, unsigned int nsegs,
 		loff_t *offset, int ioflags);
+ssize_t xfs_direct_netrx_write(struct kiocb *iocb, void *callback, void *sock);
 int xfs_bmap(struct xfs_inode *ip, xfs_off_t offset, ssize_t count,
 		int flags, struct xfs_iomap *iomapp, int *niomaps);
 void xfs_tosspages(struct xfs_inode *inode, xfs_off_t first,

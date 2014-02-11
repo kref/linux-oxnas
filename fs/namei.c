@@ -1591,6 +1591,16 @@ int may_open(struct path *path, int acc_mode, int flag)
 		if (!error) {
 			vfs_dq_init(inode);
 
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+			spin_lock(&inode->fast_lock);
+			if (inode->fast_open_count > 0) {
+//printk(KERN_INFO "may_open() %s invoking fallback\n", dentry->d_name.name);
+				fast_fallback(inode);
+			}
+			spin_unlock(&inode->fast_lock);
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
+//printk(KERN_INFO "may_open() %s\n", dentry->d_name.name);
 			error = do_truncate(dentry, 0,
 					    ATTR_MTIME|ATTR_CTIME|ATTR_OPEN,
 					    NULL);

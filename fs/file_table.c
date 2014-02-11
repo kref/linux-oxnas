@@ -257,11 +257,25 @@ EXPORT_SYMBOL_GPL(drop_file_write_access);
 /* __fput is called from task context when aio completion releases the last
  * last use of a struct file *.  Do not use otherwise.
  */
+#include <mach/fast_open_filter.h>
+
 void __fput(struct file *file)
 {
 	struct dentry *dentry = file->f_path.dentry;
 	struct vfsmount *mnt = file->f_path.mnt;
 	struct inode *inode = dentry->d_inode;
+
+	if (S_ISREG(inode->i_mode)) {
+		fast_close_filter(file);
+	} else {
+//	printk(KERN_INFO "__fput() Not using fast filter for directory %s\n", file->f_path.dentry->d_name.name);
+		if (file->f_flags & O_FAST) {
+			printk(KERN_WARNING "__fput() O_FAST set on non-regular file %s\n", file->f_path.dentry->d_name.name);
+		}
+		if (file->f_flags & O_PREALLOC) {
+			printk(KERN_WARNING "__fput() O_PREALLOC set on non-regular file %s\n", file->f_path.dentry->d_name.name);
+		}
+	}
 
 	might_sleep();
 

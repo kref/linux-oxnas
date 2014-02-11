@@ -137,6 +137,46 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	inode->i_uid = 0;
 	inode->i_gid = 0;
 	atomic_set(&inode->i_writecount, 0);
+
+	inode->do_space_reserve = 0;
+	inode->space_reserve = 0;
+	inode->prealloc_size = 0;
+	inode->prealloc_initialised = 0;
+
+	sema_init(&inode->writer_sem, 1);
+	inode->normal_open_count = 0;
+
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+	spin_lock_init(&inode->fast_lock);
+	inode->fast_open_count = 0;
+	INIT_LIST_HEAD(&inode->fast_files);
+	rwlock_init(&inode->fast_files_lock);
+	inode->close_in_progress = 0;
+	init_waitqueue_head(&inode->close_wait_queue);
+#ifdef CONFIG_SATA_OX820
+	inode->filemap_info.direct_access_context = NULL;
+#endif // CONFIG_SATA_OX820
+	inode->filemap_info.map = NULL;
+	sema_init(&inode->reader_sem, 1);
+	inode->fallback_in_progress = 0;
+	init_waitqueue_head(&inode->fallback_wait_queue);
+	inode->fast_reads_in_progress_count = 0;
+	inode->filemap_update_pending = 0;
+	init_waitqueue_head(&inode->filemap_wait_queue);
+#ifdef CONFIG_OXNAS_FAST_WRITES
+	inode->fast_writes_in_progress_count = 0;
+	inode->write_error = 0;
+	inode->writer_file_context = NULL;
+	inode->filemap_locker_uid = (void*)0;
+	inode->i_tent_size = 0;
+#ifdef CONFIG_SATA_OX820
+	inode->writer_filemap_info.direct_access_context = NULL;
+#endif // CONFIG_SATA_OX820
+	inode->writer_filemap_info.map = NULL;
+	inode->writer_filemap_dirty = 0;
+#endif //CONFIG_OXNAS_FAST_WRITES
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
 	inode->i_size = 0;
 	inode->i_blocks = 0;
 	inode->i_bytes = 0;

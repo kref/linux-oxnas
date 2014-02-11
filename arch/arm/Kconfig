@@ -637,6 +637,14 @@ config ARCH_OMAP
 	help
 	  Support for TI's OMAP platform (OMAP1 and OMAP2).
 
+config ARCH_OX820
+	bool "Oxford Semiconductor 815/820/825 NAS SoC"
+	select ARM_GIC
+	select GENERIC_CLOCKEVENTS
+	select LOCAL_TIMERS
+	help
+		This enables support for Oxsemi 815/820/825 NAS SoC
+
 endchoice
 
 source "arch/arm/mach-clps711x/Kconfig"
@@ -729,6 +737,10 @@ source "arch/arm/mach-msm/Kconfig"
 source "arch/arm/mach-u300/Kconfig"
 
 source "arch/arm/mach-w90x900/Kconfig"
+
+source "arch/arm/mach-ox820/Kconfig"
+
+source "arch/arm/plat-oxnas/Kconfig"
 
 # Definitions to make life easier
 config ARCH_ACORN
@@ -846,7 +858,7 @@ config ISA_DMA_API
 	bool
 
 config PCI
-	bool "PCI support" if ARCH_INTEGRATOR_AP || ARCH_VERSATILE_PB || ARCH_IXP4XX || ARCH_KS8695 || MACH_ARMCORE
+	bool "PCI support" if ARCH_INTEGRATOR_AP || ARCH_VERSATILE_PB || ARCH_IXP4XX || ARCH_KS8695 || MACH_ARMCORE || ARCH_OX820
 	help
 	  Find out whether you have a PCI motherboard. PCI is the name of a
 	  bus system, i.e. the way the CPU talks to the other stuff inside
@@ -881,10 +893,11 @@ source "kernel/time/Kconfig"
 config SMP
 	bool "Symmetric Multi-Processing (EXPERIMENTAL)"
 	depends on EXPERIMENTAL && (REALVIEW_EB_ARM11MP || REALVIEW_EB_A9MP ||\
-		 MACH_REALVIEW_PB11MP || MACH_REALVIEW_PBX || ARCH_OMAP4)
+		 MACH_REALVIEW_PB11MP || MACH_REALVIEW_PBX || ARCH_OMAP4 || ARCH_OX820)
 	depends on GENERIC_CLOCKEVENTS
 	select USE_GENERIC_SMP_HELPERS
-	select HAVE_ARM_SCU if (ARCH_REALVIEW || ARCH_OMAP4)
+	select HAVE_ARM_SCU if (ARCH_REALVIEW || ARCH_OMAP4 || ARCH_OX820)
+	select GENERIC_TIME if ARCH_OX820
 	help
 	  This enables support for systems with more than one CPU. If you have
 	  a system with only one CPU, like most personal computers, say N. If
@@ -909,8 +922,9 @@ config HAVE_ARM_SCU
 	  This option enables support for the ARM system coherency unit
 
 config HAVE_ARM_TWD
-	bool
-	depends on SMP
+	bool "Support for ARM timer/watchodog unit"
+	depends on SMP || ARCH_OX820
+	default y if ARCH_OX820
 	help
 	  This options enables support for the ARM timer and watchdog unit
 
@@ -953,9 +967,9 @@ config HOTPLUG_CPU
 config LOCAL_TIMERS
 	bool "Use local timer interrupts"
 	depends on SMP && (REALVIEW_EB_ARM11MP || MACH_REALVIEW_PB11MP || \
-		REALVIEW_EB_A9MP || MACH_REALVIEW_PBX || ARCH_OMAP4)
+		REALVIEW_EB_A9MP || MACH_REALVIEW_PBX || ARCH_OMAP4 || ARCH_OX820)
 	default y
-	select HAVE_ARM_TWD if (ARCH_REALVIEW || ARCH_OMAP4)
+	select HAVE_ARM_TWD if (ARCH_REALVIEW || ARCH_OMAP4 || ARCH_OX820)
 	help
 	  Enable support for local timers on SMP platforms, rather then the
 	  legacy IPI broadcast method.  Local timers allows the system

@@ -222,7 +222,7 @@ static void tdi_reset (struct ehci_hcd *ehci)
 	u32 __iomem	*reg_ptr;
 	u32		tmp;
 
-	reg_ptr = (u32 __iomem *)(((u8 __iomem *)ehci->regs) + USBMODE);
+	reg_ptr = (u32 __iomem *)&ehci->regs->usbmode;
 	tmp = ehci_readl(ehci, reg_ptr);
 	tmp |= USBMODE_CM_HC;
 	/* The default byte access to MMR space is LE after
@@ -232,6 +232,20 @@ static void tdi_reset (struct ehci_hcd *ehci)
 	if (ehci_big_endian_mmio(ehci))
 		tmp |= USBMODE_BE;
 	ehci_writel(ehci, tmp, reg_ptr);
+
+#if defined(CONFIG_ARCH_OX820)
+	reg_ptr = (u32 __iomem *)&ehci->regs->txfilltuning;
+	tmp = ehci_readl(ehci, reg_ptr);
+	tmp &= ~0x00ff0000;
+	tmp |= 0x003f0000; /* set burst pre load count to 0x40 (63 * 4 bytes)  */
+	tmp |= 0x16; /* set sheduler overhead to 22 * 1.267us (HS) or 22 * 6.33us (FS/LS)*/
+	ehci_writel(ehci, tmp, reg_ptr);
+
+	reg_ptr = (u32 __iomem *)&ehci->regs->txttfilltuning;
+	tmp = readl (reg_ptr);
+	tmp |= 0x2; /* set sheduler overhead to 2 * 6.333us */
+	writel (tmp, reg_ptr);
+#endif // CONFIG_ARCH_OX820
 }
 
 /* reset a non-running (STS_HALT == 1) controller */
@@ -251,8 +265,8 @@ static int ehci_reset (struct ehci_hcd *ehci)
 	if (retval)
 		return retval;
 
-	if (ehci_is_TDI(ehci))
-		tdi_reset (ehci);
+	if (ehci->is_tdi_rh_tt)
+		tdi_reset(ehci); /* set TDI EHCI internal registers */
 
 	return retval;
 }
@@ -1085,10 +1099,15 @@ MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_AUTHOR (DRIVER_AUTHOR);
 MODULE_LICENSE ("GPL");
 
+#if defined(CONFIG_ARCH_OX820)
+#include "ehci-oxnas.c"
+#define	PLATFORM_DRIVER		ehci_hcd_oxnas_driver
+#else // CONFIG_ARCH_OX820
 #ifdef CONFIG_PCI
 #include "ehci-pci.c"
 #define	PCI_DRIVER		ehci_pci_driver
-#endif
+#endif // CONFIG_PCI
+#endif // CONFIG_ARCH_OX820
 
 #ifdef CONFIG_USB_EHCI_FSL
 #include "ehci-fsl.c"

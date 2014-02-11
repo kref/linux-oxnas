@@ -15,6 +15,9 @@
 #include <asm/cachetype.h>
 #include <asm/system.h>
 #include <asm/tlbflush.h>
+#ifdef CONFIG_SMP_LAZY_DCACHE_FLUSH
+#include <mach/lazy-flush.h>
+#endif // CONFIG_SMP_LAZY_DCACHE_FLUSH
 
 #include "mm.h"
 
@@ -92,6 +95,8 @@ void flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned
 		v6_icache_inval_all();
 #endif
 	}
+	if (vma->vm_flags & VM_EXEC)
+		__flush_icache_all();
 }
 
 void flush_cache_page(struct vm_area_struct *vma, unsigned long user_addr, unsigned long pfn)
@@ -108,6 +113,13 @@ void flush_cache_page(struct vm_area_struct *vma, unsigned long user_addr, unsig
 		flush_pfn_alias(pfn, user_addr);
 }
 
+#ifdef CONFIG_SMP
+static void flush_ptrace_access_other(void *args)
+{
+        __flush_icache_all();
+}
+#endif
+
 void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
 			 unsigned long uaddr, void *kaddr,
 			 unsigned long len, int write)
@@ -122,15 +134,20 @@ void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
 
 	if (cache_is_vipt_aliasing()) {
 		flush_pfn_alias(page_to_pfn(page), uaddr);
+		__flush_icache_all();
 		return;
 	}
 
 	/* VIPT non-aliasing cache */
-	if (cpu_isset(smp_processor_id(), vma->vm_mm->cpu_vm_mask) &&
-	    vma->vm_flags & VM_EXEC) {
-		unsigned long addr = (unsigned long)kaddr;
+	if (vma->vm_flags & VM_EXEC) {
 		/* only flushing the kernel mapping on non-aliasing VIPT */
-		__cpuc_coherent_kern_range(addr, addr + len);
+		__cpuc_flush_dcache_area(kaddr, len);
+        __flush_icache_all();
+#ifdef CONFIG_SMP
+		smp_call_function(flush_ptrace_access_other,
+				  NULL, 1);
+#endif
+
 	}
 }
 #else
@@ -144,7 +161,7 @@ void __flush_dcache_page(struct address_space *mapping, struct page *page)
 	 * page.  This ensures that data in the physical page is mutually
 	 * coherent with the kernels mapping.
 	 */
-	__cpuc_flush_dcache_page(page_address(page));
+	__cpuc_flush_dcache_area(page_address(page), PAGE_SIZE);
 
 	/*
 	 * If this is a page cache page, and we have an aliasing VIPT cache,
@@ -188,6 +205,98 @@ static void __flush_dcache_aliases(struct address_space *mapping, struct page *p
 	flush_dcache_mmap_unlock(mapping);
 }
 
+#ifdef CONFIG_SMP_LAZY_DCACHE_FLUSH
+/*
+ * Ensure cache coherency between kernel mapping and userspace mapping
+ * of this page.
+ *
+ * Same as the non-SMP case below, but this one remembers the identity of the 
+ * CPU with the dirty caches in an atomic-friendly way.
+ * 
+ */
+void flush_dcache_page(struct page *page)
+{
+	struct address_space *mapping = page_mapping(page);
+
+	if (!PageHighMem(page) && mapping && !mapping_mapped(mapping)) {
+		int this_cpu = get_cpu();
+   		/* mark page for flush by our cpu */
+		clear_dcache_clean_cpu(page, this_cpu);
+		put_cpu();
+	} else {
+		__flush_dcache_page(mapping, page);
+		if (mapping && cache_is_vivt())
+			__flush_dcache_aliases(mapping, page);
+		else if (mapping)
+			__flush_icache_all();
+	}
+
+}
+
+#ifdef CONFIG_SMP
+void __sync_icache_dcache(pte_t pteval)
+{
+	unsigned long pfn = pte_pfn(pteval);
+
+    struct page *page;
+    
+     if (!pfn_valid(pfn))
+        return;
+    
+    page = pfn_to_page(pfn);
+    
+    if (pte_present_exec_user(pteval)) {
+        
+		int cpu_needs_flush_mask = set_dcache_clean(page);
+        
+        if (cpu_needs_flush_mask) {
+            unsigned i;
+            
+            int this_cpu = get_cpu();
+            // Iterate over all CPUs calling the appropriate flush function.
+            // It's either the local one or it needs to be called remotely.
+            for ( i = 0; i < NR_CPUS; ++i)
+            {
+                int cpu_needs_flush = ((1UL << i) & cpu_needs_flush_mask);
+            
+                if (cpu_needs_flush) {
+                    if (i == this_cpu) {
+                        /* flush locally */
+                        __flush_dcache_page(NULL, page);
+                    } else {
+                        /* flush on other processor, (waiting for it to finish)*/
+                        if (cpu_online(i)) {
+                            smp_call_function_single(i,
+                                                     remote_flush_dcache_page, (void*)page, 1);
+                        }
+                    }
+                }
+            }
+            put_cpu();
+        }
+        
+        __flush_icache_all();
+    }
+}
+#endif
+
+#else
+
+#ifdef CONFIG_SMP
+void __sync_icache_dcache(pte_t pteval)
+{
+	unsigned long pfn = pte_pfn(pteval);
+
+	if (pfn_valid(pfn) && pte_present_exec_user(pteval)) {
+		struct page *page = pfn_to_page(pfn);
+
+		if (!test_and_set_bit(PG_dcache_clean, &page->flags))
+			__flush_dcache_page(NULL, page);
+		__flush_icache_all();
+	}
+}
+#endif
+
 /*
  * Ensure cache coherency between kernel mapping and userspace mapping
  * of this page.
@@ -212,7 +321,7 @@ void flush_dcache_page(struct page *page)
 
 #ifndef CONFIG_SMP
 	if (!PageHighMem(page) && mapping && !mapping_mapped(mapping))
-		set_bit(PG_dcache_dirty, &page->flags);
+		clear_bit(PG_dcache_clean, &page->flags);
 	else
 #endif
 	{
@@ -221,8 +330,11 @@ void flush_dcache_page(struct page *page)
 			__flush_dcache_aliases(mapping, page);
 		else if (mapping)
 			__flush_icache_all();
+		set_bit(PG_dcache_clean, &page->flags);
 	}
 }
+#endif // CONFIG_SMP_LAZY_DCACHE_FLUSH
+
 EXPORT_SYMBOL(flush_dcache_page);
 
 /*
@@ -261,5 +373,5 @@ void __flush_anon_page(struct vm_area_struct *vma, struct page *page, unsigned l
 	 * in this mapping of the page.  FIXME: this is overkill
 	 * since we actually ask for a write-back and invalidate.
 	 */
-	__cpuc_flush_dcache_page(page_address(page));
+	__cpuc_flush_dcache_area(page_address(page), PAGE_SIZE);
 }

@@ -601,6 +601,46 @@ blk_init_queue_node(request_fn_proc *rfn, spinlock_t *lock, int node_id)
 }
 EXPORT_SYMBOL(blk_init_queue_node);
 
+/**
+ * This is just the function above (blk_init_queue_node) with the allocation
+ * code and checks (from blk_alloc_queue_node) removed. It is used when a 
+ * queue that has been setup using blk_alloc_queue() needs to be used with a
+ * normal request_queue */
+int
+blk_reinit_queue(struct request_queue * q, request_fn_proc *rfn, spinlock_t *lock)
+{
+	q->node = -1;
+	if (blk_init_free_list(q)) {
+		kmem_cache_free(blk_requestq_cachep, q);
+		return -1;
+	}
+
+	q->request_fn		= rfn;
+	q->prep_rq_fn		= NULL;
+	q->unplug_fn		= generic_unplug_device;
+	q->queue_flags		= QUEUE_FLAG_DEFAULT;
+	q->queue_lock		= lock;
+
+	/*
+	 * This also sets hw/phys segments, boundary and size
+	 */
+	blk_queue_make_request(q, __make_request);
+
+	q->sg_reserved_size = INT_MAX;
+
+	/*
+	 * all done
+	 */
+	if (elevator_init(q, NULL)) {
+	    return -1;
+	}
+
+    blk_queue_congestion_threshold(q);
+    return 0;
+}
+EXPORT_SYMBOL(blk_reinit_queue);
+
+
 int blk_get_queue(struct request_queue *q)
 {
 	if (likely(!test_bit(QUEUE_FLAG_DEAD, &q->queue_flags))) {

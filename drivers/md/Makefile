@@ -45,6 +45,10 @@ obj-$(CONFIG_DM_MIRROR)		+= dm-mirror.o dm-log.o dm-region-hash.o
 obj-$(CONFIG_DM_LOG_USERSPACE)	+= dm-log-userspace.o
 obj-$(CONFIG_DM_ZERO)		+= dm-zero.o
 
+obj-$(CONFIG_SATA_OX820_DIRECT_HWRAID) += ox820hwraid.o
+
+
+
 quiet_cmd_unroll = UNROLL  $@
       cmd_unroll = $(PERL) $(srctree)/$(src)/unroll.pl $(UNROLL) \
                    < $< > $@ || ( rm -f $@ && exit 1 )

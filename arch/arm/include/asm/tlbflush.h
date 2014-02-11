@@ -350,7 +350,11 @@ static inline void local_flush_tlb_mm(struct mm_struct *mm)
 	if (tlb_flag(TLB_WB))
 		dsb();
 
+#if defined(CONFIG_ARCH_OX820) && defined(CONFIG_SMP)
+	if (cpu_isset(hard_smp_processor_id(), mm->cpu_vm_mask)) {
+#else // defined(CONFIG_ARCH_OX820) && defined(CONFIG_SMP)
 	if (cpu_isset(smp_processor_id(), mm->cpu_vm_mask)) {
+#endif // defined(CONFIG_ARCH_OX820) && defined(CONFIG_SMP)
 		if (tlb_flag(TLB_V3_FULL))
 			asm("mcr p15, 0, %0, c6, c0, 0" : : "r" (zero) : "cc");
 		if (tlb_flag(TLB_V4_U_FULL))
@@ -388,7 +392,11 @@ local_flush_tlb_page(struct vm_area_struct *vma, unsigned long uaddr)
 	if (tlb_flag(TLB_WB))
 		dsb();
 
+#if defined(CONFIG_ARCH_OX820) && defined(CONFIG_SMP)
+	if (cpu_isset(hard_smp_processor_id(), vma->vm_mm->cpu_vm_mask)) {
+#else // defined(CONFIG_ARCH_OX820) && defined(CONFIG_SMP)
 	if (cpu_isset(smp_processor_id(), vma->vm_mm->cpu_vm_mask)) {
+#endif // defined(CONFIG_ARCH_OX820) && defined(CONFIG_SMP)
 		if (tlb_flag(TLB_V3_PAGE))
 			asm("mcr p15, 0, %0, c6, c0, 0" : : "r" (uaddr) : "cc");
 		if (tlb_flag(TLB_V4_U_PAGE))
@@ -524,11 +532,20 @@ extern void flush_tlb_kernel_range(unsigned long start, unsigned long end);
 #endif
 
 /*
- * if PG_dcache_dirty is set for the page, we need to ensure that any
+ * If PG_dcache_clean is not set for the page, we need to ensure that any
  * cache entries for the kernels virtual memory range are written
- * back to the page.
+ * back to the page. On SMP systems, the cache coherency is handled in the
+ * set_pte_at() function.
  */
-extern void update_mmu_cache(struct vm_area_struct *vma, unsigned long addr, pte_t pte);
+#ifndef CONFIG_SMP
+extern void update_mmu_cache(struct vm_area_struct *vma, unsigned long addr,
+ 	pte_t pte);
+#else
+static inline void update_mmu_cache(struct vm_area_struct *vma,
+				    unsigned long addr, pte_t pte)
+{
+}
+#endif
 
 #endif
 

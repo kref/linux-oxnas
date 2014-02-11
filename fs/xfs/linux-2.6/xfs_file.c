@@ -39,6 +39,7 @@
 #include "xfs_vnodeops.h"
 #include "xfs_da_btree.h"
 #include "xfs_ioctl.h"
+#include "xfs_iomap.h"
 
 #include <linux/dcache.h>
 
@@ -80,6 +81,28 @@ xfs_file_aio_write(
 		ioflags |= IO_INVIS;
 	return xfs_write(XFS_I(file->f_mapping->host), iocb, iov, nr_segs,
 				&iocb->ki_pos, ioflags);
+}
+
+STATIC ssize_t
+xfs_file_sendfile(
+	struct file *filp,
+	loff_t		*pos,
+	size_t		 count,
+	read_actor_t actor,
+	void		*target)
+{
+	return xfs_sendfile(XFS_I(filp->f_path.dentry->d_inode), filp, pos, 0, count, actor, target, 0);
+}
+
+STATIC ssize_t
+xfs_file_sendfile_incoherent(
+	struct file	 *filp,
+	loff_t		 *pos,
+	size_t		  count,
+	read_actor_t  actor,
+	void		 *target)
+{
+	return xfs_sendfile(XFS_I(filp->f_path.dentry->d_inode), filp, pos, 0, count, actor, target, 1);
 }
 
 STATIC ssize_t
@@ -238,12 +261,91 @@ xfs_vm_page_mkwrite(
 	return block_page_mkwrite(vma, vmf, xfs_get_blocks);
 }
 
+STATIC ssize_t
+xfs_file_aio_direct_netrx_write(
+	struct kiocb *iocb,
+	void         *callback,
+	void         *sock)
+{
+	return xfs_direct_netrx_write(iocb, callback, sock);
+}
+
+STATIC int
+xfs_preallocate(
+	struct file	*filp,
+	loff_t		 start,
+	loff_t		 length)
+{
+	struct inode	 *inode = filp->f_path.dentry->d_inode;
+	struct xfs_inode *ip = XFS_I(inode);
+	int               ioflags = 0;
+	xfs_flock64_t     info;
+//printk("xfs_preallocate() inode %p, file %p, start %lld, length %lld\n", inode, filp, start, length);
+
+	/* Tell XFS of the region to preallocate */
+	info.l_whence = 0;
+	info.l_start  = start;
+	info.l_len    = length;
+	info.l_type   = 0;
+	info.l_sysid  = 0;
+	info.l_pid    = 0;
+
+	if (filp->f_mode & FMODE_NOCMTIME) {
+		ioflags |= IO_INVIS;
+	}
+
+	return xfs_ioc_space(ip, inode, filp, ioflags, XFS_IOC_RESVSP64, &info);
+}
+
+STATIC int
+xfs_unpreallocate(
+	struct file	*filp,
+	loff_t		 start,
+	loff_t		 length)
+{
+	struct inode	 *inode = filp->f_path.dentry->d_inode;
+	struct xfs_inode *ip = XFS_I(inode);
+	int               ioflags = 0;
+	xfs_flock64_t     info;
+//printk("xfs_unpreallocate() inode %p, file %p, start %lld, length %lld\n", inode, filp, start, length);
+
+	/* Tell XFS of the region to preallocate */
+	info.l_whence = 0;
+	info.l_start  = start;
+	info.l_len    = length;
+	info.l_type   = 0;
+	info.l_sysid  = 0;
+	info.l_pid    = 0;
+
+	if (filp->f_mode & FMODE_NOCMTIME) {
+		ioflags |= IO_INVIS;
+	}
+
+	return xfs_ioc_space(ip, inode, filp, ioflags, XFS_IOC_UNRESVSP64, &info);
+}
+
+STATIC int
+xfs_reset_preallocate(
+	struct file	*filp,
+	loff_t       start,
+	loff_t      length)
+{
+	struct inode     *inode = filp->f_path.dentry->d_inode;
+	struct xfs_inode *ip = XFS_I(inode);
+
+//printk("xfs_reset_preallocate() inode %p file %p, start %lld, length %lld\n", inode, filp, start, length);
+	return xfs_iomap_write_unwritten(ip, start, length);
+}
+
 const struct file_operations xfs_file_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= do_sync_read,
 	.write		= do_sync_write,
 	.aio_read	= xfs_file_aio_read,
 	.aio_write	= xfs_file_aio_write,
+	.aio_direct_netrx_write = xfs_file_aio_direct_netrx_write,
+	.sendfile		= xfs_file_sendfile,
+	.incoherent_sendfile	= xfs_file_sendfile_incoherent,
 	.splice_read	= xfs_file_splice_read,
 	.splice_write	= xfs_file_splice_write,
 	.unlocked_ioctl	= xfs_file_ioctl,
@@ -257,6 +359,9 @@ const struct file_operations xfs_file_operations = {
 #ifdef HAVE_FOP_OPEN_EXEC
 	.open_exec	= xfs_file_open_exec,
 #endif
+	.preallocate = xfs_preallocate,
+	.unpreallocate = xfs_unpreallocate,
+	.resetpreallocate = xfs_reset_preallocate,
 };
 
 const struct file_operations xfs_dir_file_operations = {

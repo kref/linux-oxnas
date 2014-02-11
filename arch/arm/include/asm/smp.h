@@ -100,4 +100,7 @@ extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);
  */
 extern void show_local_irqs(struct seq_file *);
 
+/* Added from 2.6.24 to make 820 build for SMP */
+extern void smp_send_timer(void);
+
 #endif /* ifndef __ASM_ARM_SMP_H */

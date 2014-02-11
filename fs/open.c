@@ -216,11 +216,36 @@ int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	/* Remove suid/sgid on truncate too */
 	newattrs.ia_valid |= should_remove_suid(dentry);
 
+//printk(KERN_INFO "do_truncate() %s\n", dentry->d_name.name);
 	mutex_lock(&dentry->d_inode->i_mutex);
 	err = notify_change(dentry, &newattrs);
 	mutex_unlock(&dentry->d_inode->i_mutex);
+
+	while (down_timeout(&dentry->d_inode->writer_sem, HZ)) {
+		printk("do_truncate() A second has elapsed while waiting, file %s\n", filp->f_path.dentry->d_name.name);
+	}
+	if(dentry->d_inode->prealloc_size > length) {
+		if( dentry->d_inode->truncate_space_reset) {
+			dentry->d_inode->prealloc_size = length;
+		} else if(length == 0) {
+			dentry->d_inode->prealloc_size = length;
+		}
+	}
+	up(&dentry->d_inode->writer_sem);
+
 	return err;
 }
+
+#ifdef CONFIG_OXNAS_FAST_WRITES
+	extern void flush_writes(struct inode *inode);
+	extern void writer_remap_file(struct inode *inode);
+#else // CONFIG_OXNAS_FAST_WRITES
+
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+	extern void incoherent_sendfile_remap_file(struct inode *inode);
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
+#endif // CONFIG_OXNAS_FAST_WRITES
 
 static long do_sys_truncate(const char __user *pathname, loff_t length)
 {
@@ -275,6 +300,17 @@ static long do_sys_truncate(const char __user *pathname, loff_t length)
 		error = security_path_truncate(&path, length, 0);
 	if (!error) {
 		vfs_dq_init(inode);
+
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		spin_lock(&inode->fast_lock);
+		if (inode->fast_open_count > 0) {
+//printk(KERN_INFO "do_sys_truncate() %s invoking fallback\n", path.dentry->d_name.name);
+			fast_fallback(inode);
+		}
+		spin_unlock(&inode->fast_lock);
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
+//printk(KERN_INFO "do_sys_truncate() %s\n", path.dentry->d_name.name);
 		error = do_truncate(path.dentry, length, 0, NULL);
 	}
 
@@ -332,8 +368,20 @@ static long do_sys_ftruncate(unsigned int fd, loff_t length, int small)
 	if (!error)
 		error = security_path_truncate(&file->f_path, length,
 					       ATTR_MTIME|ATTR_CTIME);
-	if (!error)
+	if (!error) {
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		spin_lock(&inode->fast_lock);
+		if (inode->fast_open_count > 0) {
+//printk(KERN_INFO "do_sys_ftruncate() %s invoking fallback\n", file->f_path.dentry->d_name.name);
+			fast_fallback(inode);
+		}
+		spin_unlock(&inode->fast_lock);
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+
+//printk(KERN_INFO "do_sys_ftruncate() %s\n", file->f_path.dentry->d_name.name);
 		error = do_truncate(dentry, length, ATTR_MTIME|ATTR_CTIME, file);
+	}
+
 out_putf:
 	fput(file);
 out:
@@ -803,6 +851,8 @@ static inline int __get_file_write_access(struct inode *inode,
 	return error;
 }
 
+#include <mach/fast_open_filter.h>
+
 static struct file *__dentry_open(struct dentry *dentry, struct vfsmount *mnt,
 					int flags, struct file *f,
 					int (*open)(struct inode *, struct file *),
@@ -853,6 +903,23 @@ static struct file *__dentry_open(struct dentry *dentry, struct vfsmount *mnt,
 		    (!f->f_mapping->a_ops->get_xip_mem))) {
 			fput(f);
 			f = ERR_PTR(-EINVAL);
+		}
+	}
+
+	if (S_ISREG(inode->i_mode)) {
+		if (fast_open_filter(f, inode)) {
+			fput(f);
+			f = ERR_PTR(-EINVAL);
+		}
+	} else {
+//	printk(KERN_INFO "__dentry_open() Not using fast filter for directory %s\n", f->f_path.dentry->d_name.name);
+		if (f->f_flags & O_FAST) {
+//			printk(KERN_WARNING "__dentry_open() O_FAST set on directory %s, forcing off\n", f->f_path.dentry->d_name.name);
+			f->f_flags &= ~O_FAST;
+		}
+		if (f->f_flags & O_PREALLOC) {
+//			printk(KERN_WARNING "__dentry_open() O_PREALLOC set on directory %s, forcing off\n", f->f_path.dentry->d_name.name);
+			f->f_flags &= ~O_PREALLOC;
 		}
 	}
 
@@ -1105,6 +1172,7 @@ int filp_close(struct file *filp, fl_owner_t id)
 
 	dnotify_flush(filp, id);
 	locks_remove_posix(filp, id);
+
 	fput(filp);
 	return retval;
 }

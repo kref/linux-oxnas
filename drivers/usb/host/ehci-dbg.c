@@ -803,6 +803,24 @@ static ssize_t fill_registers_buffer(struct debug_buffer *buf)
 	size -= temp;
 	next += temp;
 #endif
+	
+#ifdef CONFIG_ARCH_OX820
+	/* show clock divider register settings. */
+	temp = scnprintf (next, size,
+		"ref300 cken:%08x rsten:%08x ref300 div:%08x\n",
+		readl(SYS_CTRL_CKEN_CTRL), readl(SYS_CTRL_RSTEN_CTRL), readl(SYS_CTRL_REF300_DIV)
+		);
+	size -= temp;
+	next += temp;
+	
+	/* usb phy clock source */
+	temp = scnprintf (next, size,
+		"clock source usb ctrl:%08x\n",
+		  readl(SYS_CTRL_USB_CTRL));
+	size -= temp;
+	next += temp;
+	
+#endif
 
 done:
 	spin_unlock_irqrestore (&ehci->lock, flags);

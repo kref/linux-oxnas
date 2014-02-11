@@ -161,7 +161,10 @@ struct mii_if_info {
 
 	unsigned int full_duplex : 1;	/* is full duplex? */
 	unsigned int force_media : 1;	/* is autoneg. disabled? */
-	unsigned int supports_gmii : 1; /* are GMII registers supported? */
+	unsigned int supports_gmii : 1;	/* are GMII registers supported? */
+	unsigned int using_1000 : 1;    /* the PHY is using 1000Mb rate */
+	unsigned int using_100 : 1;     /* the PHY is using 100Mb rate */
+	unsigned int using_pause : 1;	/* the PHY will generate pause frames */
 
 	struct net_device *dev;
 	int (*mdio_read) (struct net_device *dev, int phy_id, int location);
@@ -174,9 +177,16 @@ extern int mii_ethtool_gset(struct mii_if_info *mii, struct ethtool_cmd *ecmd);
 extern int mii_ethtool_sset(struct mii_if_info *mii, struct ethtool_cmd *ecmd);
 extern int mii_check_gmii_support(struct mii_if_info *mii);
 extern void mii_check_link (struct mii_if_info *mii);
-extern unsigned int mii_check_media (struct mii_if_info *mii,
-				     unsigned int ok_to_print,
-				     unsigned int init_media);
+extern unsigned int mii_check_media(struct mii_if_info *mii,
+                                    unsigned int ok_to_print,
+                                    unsigned int init_media);
+extern unsigned int mii_check_media_ex(struct mii_if_info *mii,
+                                    unsigned int ok_to_print,
+                                    unsigned int init_media,
+                                    int *has_speed_changed,
+									 int *has_pause_changed,
+									 void (*link_state_change_callback)(int link_state, void* arg),
+									 void *link_state_change_arg);
 extern int generic_mii_ioctl(struct mii_if_info *mii_if,
                       	     struct mii_ioctl_data *mii_data, int cmd,
 			     unsigned int *duplex_changed);
@@ -218,6 +228,23 @@ static inline unsigned int mii_nway_result (unsigned int negotiated)
 		ret = LPA_10HALF;
 
 	return ret;
+}
+
+static inline unsigned int mii_nway_result_1000(unsigned int lpa_1000, unsigned int advertised_1000)
+{
+	int full_negotiated = (lpa_1000 & LPA_1000FULL) &&
+						  (advertised_1000 & ADVERTISE_1000FULL);
+
+	int half_negotiated = (lpa_1000 & LPA_1000HALF) &&
+						  (advertised_1000 & ADVERTISE_1000HALF);
+	
+	if (full_negotiated) {
+		return LPA_1000FULL;
+	} else if (half_negotiated) {
+		return LPA_1000HALF;
+	} else {
+		return 0;
+	}
 }
 
 /**

@@ -454,6 +454,20 @@ config USB_NET2280
 	default USB_GADGET
 	select USB_GADGET_SELECTED
 
+config USB_GADGET_78XX
+	boolean "NAS78XX device controller"
+	select USB_GADGET_DUALSPEED
+	help
+		Support for the USB gadget in the NAS78XX family
+		of devices.
+
+config USB_78XX
+	tristate
+	depends on USB_GADGET_78XX
+	default USB_GADGET
+	select USB_GADGET_SELECTED
+
+
 config USB_GADGET_GOKU
 	boolean "Toshiba TC86C001 'Goku-S'"
 	depends on PCI

@@ -1467,9 +1467,9 @@ static void __lock_sock(struct sock *sk)
 	for (;;) {
 		prepare_to_wait_exclusive(&sk->sk_lock.wq, &wait,
 					TASK_UNINTERRUPTIBLE);
-		spin_unlock_bh(&sk->sk_lock.slock);
+		wspin_unlock_bh(&sk->sk_lock.slock);
 		schedule();
-		spin_lock_bh(&sk->sk_lock.slock);
+		wspin_lock_bh(&sk->sk_lock.slock);
 		if (!sock_owned_by_user(sk))
 			break;
 	}
@@ -1885,11 +1885,11 @@ EXPORT_SYMBOL(sock_init_data);
 void lock_sock_nested(struct sock *sk, int subclass)
 {
 	might_sleep();
-	spin_lock_bh(&sk->sk_lock.slock);
+	wspin_lock_bh(&sk->sk_lock.slock);
 	if (sk->sk_lock.owned)
 		__lock_sock(sk);
 	sk->sk_lock.owned = 1;
-	spin_unlock(&sk->sk_lock.slock);
+	wspin_unlock(&sk->sk_lock.slock);
 	/*
 	 * The sk_lock has mutex_lock() semantics here:
 	 */
@@ -1905,13 +1905,13 @@ void release_sock(struct sock *sk)
 	 */
 	mutex_release(&sk->sk_lock.dep_map, 1, _RET_IP_);
 
-	spin_lock_bh(&sk->sk_lock.slock);
+	wspin_lock_bh(&sk->sk_lock.slock);
 	if (sk->sk_backlog.tail)
 		__release_sock(sk);
 	sk->sk_lock.owned = 0;
 	if (waitqueue_active(&sk->sk_lock.wq))
 		wake_up(&sk->sk_lock.wq);
-	spin_unlock_bh(&sk->sk_lock.slock);
+	wspin_unlock_bh(&sk->sk_lock.slock);
 }
 EXPORT_SYMBOL(release_sock);
 

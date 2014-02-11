@@ -257,9 +257,17 @@ static void bad_page(struct page *page)
 	printk(KERN_ALERT "BUG: Bad page state in process %s  pfn:%05lx\n",
 		current->comm, page_to_pfn(page));
 	printk(KERN_ALERT
-		"page:%p flags:%p count:%d mapcount:%d mapping:%p index:%lx\n",
+		"page:%p flags:%p count:%d mapcount:%d mapping:%p index:%lx"
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		", incoherent %d"
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+		"\n",
 		page, (void *)page->flags, page_count(page),
-		page_mapcount(page), page->mapping, page->index);
+		page_mapcount(page), page->mapping, page->index
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		,PageIncoherentSendfile(page)
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+		);
 
 	dump_stack();
 out:
@@ -498,6 +506,9 @@ static void free_page_mlock(struct page *page) { }
 static inline int free_pages_check(struct page *page)
 {
 	if (unlikely(page_mapcount(page) |
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		PageIncoherentSendfile(page) |
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		(page->mapping != NULL)  |
 		(atomic_read(&page->_count) != 0) |
 		(page->flags & PAGE_FLAGS_CHECK_AT_FREE))) {
@@ -649,6 +660,9 @@ static inline void expand(struct zone *zone, struct page *page,
 static int prep_new_page(struct page *page, int order, gfp_t gfp_flags)
 {
 	if (unlikely(page_mapcount(page) |
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		PageIncoherentSendfile(page) |
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		(page->mapping != NULL)  |
 		(atomic_read(&page->_count) != 0)  |
 		(page->flags & PAGE_FLAGS_CHECK_AT_PREP))) {
@@ -1954,10 +1968,11 @@ void __pagevec_free(struct pagevec *pvec)
 void __free_pages(struct page *page, unsigned int order)
 {
 	if (put_page_testzero(page)) {
-		if (order == 0)
+		if (order == 0) {
 			free_hot_page(page);
-		else
+		} else {
 			__free_pages_ok(page, order);
+		}
 	}
 }
 

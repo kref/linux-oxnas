@@ -335,6 +335,8 @@ struct sk_buff {
 	unsigned int		len,
 				data_len;
 	__u16			mac_len,
+				ip_header_len,
+//				tcp_header_len,
 				hdr_len;
 	union {
 		__wsum		csum;
@@ -355,6 +357,7 @@ struct sk_buff {
 				ipvs_property:1,
 				peeked:1,
 				nf_trace:1;
+	__u8		zcc:1;
 	kmemcheck_bitfield_end(flags1);
 	__be16			protocol;
 
@@ -1689,8 +1692,10 @@ static inline int pskb_trim_rcsum(struct sk_buff *skb, unsigned int len)
 {
 	if (likely(len >= skb->len))
 		return 0;
-	if (skb->ip_summed == CHECKSUM_COMPLETE)
+	if (skb->ip_summed == CHECKSUM_COMPLETE) {
+		printk("pskb_trim_rcsum() called to recompute csum for padded packet\n");
 		skb->ip_summed = CHECKSUM_NONE;
+	}
 	return __pskb_trim(skb, len);
 }
 

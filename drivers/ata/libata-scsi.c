@@ -2480,6 +2480,11 @@ static void atapi_request_sense(struct ata_queued_cmd *qc)
 
 	DPRINTK("ATAPI request sense\n");
 
+	if (ap->ops->acquire_hw && !ap->ops->acquire_hw(ap->port_no, 0, 0)) {
+		printk(KERN_WARNING "atapi_request_sense() Failed to acquire hardware\n");
+		return;
+	}
+
 	/* FIXME: is this needed? */
 	memset(cmd->sense_buffer, 0, SCSI_SENSE_BUFFERSIZE);
 
