@@ -383,7 +383,8 @@ int cifs_get_inode_info_unix(struct inode **pinode,
 
 	/* check for Minshall+French symlinks */
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MF_SYMLINKS) {
-		int tmprc = CIFSCheckMFSymlink(&fattr, full_path, cifs_sb, xid);
+		int tmprc = CIFSCheckMFSymlink(xid, tcon, cifs_sb, &fattr,
+					       full_path);
 		if (tmprc)
 			cifs_dbg(FYI, "CIFSCheckMFSymlink: %d\n", tmprc);
 	}
@@ -517,10 +518,15 @@ static int cifs_sfu_mode(struct cifs_fattr *fattr, const unsigned char *path,
 		return PTR_ERR(tlink);
 	tcon = tlink_tcon(tlink);
 
-	rc = CIFSSMBQAllEAs(xid, tcon, path, "SETFILEBITS",
-			    ea_value, 4 /* size of buf */, cifs_sb->local_nls,
-			    cifs_sb->mnt_cifs_flags &
-				CIFS_MOUNT_MAP_SPECIAL_CHR);
+	if (tcon->ses->server->ops->query_all_EAs == NULL) {
+		cifs_put_tlink(tlink);
+		return -EOPNOTSUPP;
+	}
+
+	rc = tcon->ses->server->ops->query_all_EAs(xid, tcon, path,
+			"SETFILEBITS", ea_value, 4 /* size of buf */,
+			cifs_sb->local_nls,
+			cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MAP_SPECIAL_CHR);
 	cifs_put_tlink(tlink);
 	if (rc < 0)
 		return (int)rc;
@@ -799,7 +805,8 @@ cifs_get_inode_info(struct inode **inode, const char *full_path,
 
 	/* check for Minshall+French symlinks */
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MF_SYMLINKS) {
-		tmprc = CIFSCheckMFSymlink(&fattr, full_path, cifs_sb, xid);
+		tmprc = CIFSCheckMFSymlink(xid, tcon, cifs_sb, &fattr,
+					   full_path);
 		if (tmprc)
 			cifs_dbg(FYI, "CIFSCheckMFSymlink: %d\n", tmprc);
 	}
